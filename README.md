@@ -11,3 +11,9 @@
 | [docs/出典と権利の台帳.md](docs/出典と権利の台帳.md) | 外から来た考え方・素材の記録 |
 | [docs/あとで足す案.md](docs/あとで足す案.md) | 元の全体仕様書。全部【案】で、あとで足す候補 |
 | [CLAUDE.md](CLAUDE.md) | AIへの指示 |
+
+## ゲームを開く・動かす
+
+- **公開リンク**(GitHub Pages を有効にしたあと):`https://karakara122.github.io/organizational-structure-game/`
+- AI向けのコマンド:`npm ci`(最初の1回)/ `npm test`(自動テスト)/ `npm run build`(ビルド)/ `npm run dev`(開発用の画面)
+- 計算の部分は画面と分けて作ります(`src/` の中で、画面のファイルと計算のファイルを別にします)。
