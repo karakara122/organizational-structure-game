@@ -1,6 +1,6 @@
-import { rand01, TAG } from "./rng";
-import { TUNING, type Step } from "./params";
-import type { Dept, Staff, World } from "./types";
+import { poisson, rand01, TAG } from "./rng";
+import { JOB_KIND_LIST, JOB_KINDS, TUNING, type Step } from "./params";
+import type { Dept, Job, Staff, World } from "./types";
 import { payroll } from "./org";
 
 /** 架空の名前(実在の人物と結びつかない組み合わせを自動で作る) */
@@ -16,6 +16,9 @@ function makeName(seed: number, index: number): string {
 /** 専門能力のならび(平均が3)。部署ごとにずらして使う */
 const PRIMARY_SKILL_PATTERN = [3, 2, 4, 3, 3, 2, 4, 3];
 const MANAGE_PATTERN = [3, 2, 3, 4, 3, 2, 4, 3];
+
+/** 主な分野以外の専門能力(仮の値)。能力2は能率0.67なので、人を動かす意味はあるが、損もある */
+const OTHER_FIELD_SKILL = 2;
 
 interface DeptPlan {
   name: string;
@@ -39,7 +42,11 @@ export function createInitialWorld(seed = 1): World {
     const deptId = di + 1;
     let headId: number | null = null;
     for (let i = 0; i < plan.count; i++) {
-      const skills: Record<Step, number> = { estimate: 1, produce: 1, inspect: 1 };
+      const skills: Record<Step, number> = {
+        estimate: OTHER_FIELD_SKILL,
+        produce: OTHER_FIELD_SKILL,
+        inspect: OTHER_FIELD_SKILL,
+      };
       skills[plan.field] = PRIMARY_SKILL_PATTERN[(i + di * 3) % PRIMARY_SKILL_PATTERN.length]!;
       const isHeadOfDept = i === 0;
       staff.push({
@@ -76,5 +83,69 @@ export function createInitialWorld(seed = 1): World {
     records: [],
   };
   w.payrollCap = payroll(w) * TUNING.payrollCapRatio;
+  addHandover(w);
   return w;
+}
+
+/** 引き継ぎ時の期限内完了率の目安(仕様書 4章「約60%」)。過去30日の記録をこの割合で作る */
+export const HANDOVER_ON_TIME = 0.6;
+
+function emptyDays() {
+  return { work: 0, queue: 0, approval: 0, handoff: 0, rework: 0 };
+}
+
+/**
+ * 会社を引き継いだ時点の状態を作る:過去の業務の記録と、いまたまっている業務。
+ * 過去30日に期限をむかえた業務は、約60%が期限内(=引き継ぎ時の完了率)。
+ * 期限がこれからの業務は、半分が途中(たまっている)、半分は期限内に完了済み。
+ * 日付が負の数の業務は「引き継ぐ前」に発生したもの。
+ */
+function addHandover(w: World): void {
+  const maxLimit = Math.max(...JOB_KIND_LIST.map((k) => JOB_KINDS[k].limitDays));
+  JOB_KIND_LIST.forEach((kind, ki) => {
+    const spec = JOB_KINDS[kind];
+    for (let a = -(maxLimit + TUNING.windowDays); a <= 0; a++) {
+      const deadline = a + spec.limitDays;
+      if (deadline < -(TUNING.windowDays - 1)) continue; // 数えない期間の業務は作らない
+      const n = poisson(spec.ratePerDay, w.seed, TAG.history, a, ki);
+      for (let i = 0; i < n; i++) {
+        const r = (k: number) => rand01(w.seed, TAG.history, a, ki, i, k);
+        const base: Job = {
+          id: w.nextJobId++,
+          kind,
+          arrivedDay: a,
+          deadlineDay: deadline,
+          stepIdx: spec.route.length - 1,
+          remaining: 0,
+          availableOn: 1,
+          assignee: null,
+          phase: "done",
+          pendingFlaw: false,
+          flaws: [],
+          redo: null,
+          reworking: false,
+          attempt: 0,
+          doneDay: null,
+          days: emptyDays(),
+          workedToday: false,
+        };
+        if (deadline <= 0) {
+          const onTime = r(1) < HANDOVER_ON_TIME;
+          base.doneDay = onTime
+            ? Math.max(a, deadline - Math.floor(r(2) * 3))
+            : Math.min(0, deadline + 1 + Math.floor(r(2) * 4));
+          w.finished.push(base);
+        } else if (r(1) < 0.5) {
+          const idx = Math.floor(r(2) * spec.route.length);
+          base.phase = "queued";
+          base.stepIdx = idx;
+          base.remaining = spec.route[idx]!.work * (0.3 + 0.7 * r(3));
+          w.jobs.push(base);
+        } else {
+          base.doneDay = Math.max(a, Math.min(0, deadline - 1 - Math.floor(r(2) * 3)));
+          w.finished.push(base);
+        }
+      }
+    }
+  });
 }

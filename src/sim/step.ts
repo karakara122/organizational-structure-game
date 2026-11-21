@@ -7,6 +7,7 @@ import {
   getDept,
   getStaff,
   headOrAbove,
+  isWithin,
   manageEffect,
   manageTimeNeeded,
   payroll,
@@ -81,7 +82,8 @@ function pickJob(w: World, day: number, deptId: number): Job | null {
   let best: Job | null = null;
   for (const j of w.jobs) {
     if (j.phase !== "queued" || j.assignee !== null || j.availableOn > day) continue;
-    if (w.stepOwner[currentStep(j)] !== deptId) continue;
+    // 工程を担当する部署と、その下の部署の職員が、その工程の作業をする
+    if (!isWithin(w, deptId, w.stepOwner[currentStep(j)])) continue;
     if (
       best === null ||
       j.deadlineDay < best.deadlineDay ||
@@ -99,7 +101,8 @@ function resolveApprover(w: World, job: Job): Approver {
   return w.approval[step] === "head" ? headOrAbove(w, owner.id) : headOrAbove(w, owner.parentId);
 }
 
-function onTimeRate(w: World, day: number): number | null {
+/** 直近30日に期限をむかえた業務の期限内完了率。対象が無ければ null */
+export function onTimeRate(w: World, day: number = w.day): number | null {
   const from = day - TUNING.windowDays + 1;
   let total = 0;
   let onTime = 0;

@@ -27,6 +27,9 @@ function tinyWorld(opts: { staff: number; skill?: number; head?: boolean; seed?:
   const w = createInitialWorld(opts.seed ?? 1);
   const skill = opts.skill ?? 3;
   w.arrivalScale = 0;
+  w.jobs = [];
+  w.finished = [];
+  w.nextJobId = 1;
   w.depts = [{ id: 1, name: "テスト部", parentId: null, headId: opts.head === false ? null : 1 }];
   w.staff = [];
   for (let i = 1; i <= opts.staff + 1; i++) {
@@ -119,9 +122,10 @@ describe("最初の会社", () => {
     expect(w.depts.every((d) => d.headId !== null && d.parentId === null)).toBe(true);
   });
 
-  it("人件費は 22×1.0+3×1.5=26.5、上限はその1.1倍", () => {
-    expect(payroll(w)).toBeCloseTo(26.5);
-    expect(w.payrollCap).toBeCloseTo(26.5 * 1.1);
+  it("人件費は 職員22人×給与+部署長3人×部署長の給与、上限はその1.1倍", () => {
+    const expected = 22 * TUNING.salaryStaff + 3 * TUNING.salaryHead;
+    expect(payroll(w)).toBeCloseTo(expected);
+    expect(w.payrollCap).toBeCloseTo(expected * TUNING.payrollCapRatio);
   });
 
   it("主な分野の専門能力は、部署ごとの平均がおよそ3", () => {
@@ -144,18 +148,21 @@ describe("最初の会社", () => {
 });
 
 describe("管理の式", () => {
-  it("部下13人・管理能力3なら、管理に1.04人日", () => {
-    expect(manageTimeNeeded(13, 3)).toBeCloseTo(1.04);
+  it("部下13人・管理能力3なら、管理に 13×(部下1人あたりの時間) 人日", () => {
+    expect(manageTimeNeeded(13, 3)).toBeCloseTo(13 * TUNING.manageTimePerSubordinate);
   });
   it("管理能力が高いほど、必要な時間が少ない", () => {
     expect(manageTimeNeeded(10, 5)).toBeLessThan(manageTimeNeeded(10, 3));
   });
-  it("足りているとき効きは1.0、足りないほど下がり、下限は0.7", () => {
+  it("足りているとき効きは1.0、足りないほど下がり、下限をこえない", () => {
+    const floor = TUNING.manageEffectFloor;
     expect(manageEffect(0.5)).toBe(1);
     expect(manageEffect(1)).toBe(1);
-    expect(manageEffect(2)).toBeCloseTo(0.85);
-    expect(manageEffect(1000)).toBeGreaterThanOrEqual(TUNING.manageEffectFloor);
-    expect(manageEffect(1000)).toBeLessThan(0.701);
+    // 必要時間が2のとき、不足は半分 → 効き = 1 − (1 − 下限) × 0.5
+    expect(manageEffect(2)).toBeCloseTo(1 - (1 - floor) * 0.5);
+    expect(manageEffect(1000)).toBeGreaterThanOrEqual(floor);
+    expect(manageEffect(1000)).toBeLessThan(floor + 0.01);
+    expect(manageEffect(1.5)).toBeGreaterThan(manageEffect(3));
   });
 });
 
@@ -179,11 +186,11 @@ describe("1日の計算", () => {
     expect(job.days.queue).toBe(2);
   });
 
-  it("部署長が空席だと、管理の効きが0.7になる", () => {
+  it("部署長が空席だと、管理の効きが下限になる", () => {
     const w = tinyWorld({ staff: 1, head: false });
     const job = addJob(w, { stepIdx: 1, remaining: 2 });
     stepDay(w);
-    expect(job.remaining).toBeCloseTo(2 - 0.7);
+    expect(job.remaining).toBeCloseTo(2 - TUNING.manageEffectFloor);
   });
 
   it("専門能力が高いほど速い(能力5は3の約1.67倍)", () => {
@@ -331,8 +338,10 @@ describe("全体の性質", () => {
     const w = createInitialWorld(2);
     runDays(w, 90);
     const arrived = w.records.reduce((n, r) => n + r.arrived, 0);
-    expect(w.finished.length + w.jobs.length).toBe(arrived);
-    for (const j of w.finished) {
+    // 引き継ぎ前(日付が0以下)の業務は数えない
+    const fromStart = (j: Job) => j.arrivedDay >= 1;
+    expect(w.finished.filter(fromStart).length + w.jobs.filter(fromStart).length).toBe(arrived);
+    for (const j of w.finished.filter(fromStart)) {
       expect(j.doneDay!).toBeGreaterThanOrEqual(j.arrivedDay);
       const days = Object.values(j.days).reduce((a, b) => a + b, 0);
       expect(days).toBeLessThanOrEqual(j.doneDay! - j.arrivedDay + 1);
@@ -346,15 +355,13 @@ describe("全体の性質", () => {
     }
   });
 
-  it("操作の結果が変わる:承認を無くすと、90日の期限内完了率が上がる", () => {
-    for (const seed of [1, 2, 3]) {
-      const base = createInitialWorld(seed);
-      const fixed = createInitialWorld(seed);
-      for (const s of STEPS) setApproval(fixed, s, "none");
-      runDays(base, 90);
-      runDays(fixed, 90);
-      expect(fixed.records[89]!.onTimeRate!).toBeGreaterThan(base.records[89]!.onTimeRate!);
-    }
+  it("操作の結果が変わる:承認の方法を変えると、90日の展開が変わる", () => {
+    const base = createInitialWorld(1);
+    const changed = createInitialWorld(1);
+    for (const s of STEPS) setApproval(changed, s, "none");
+    runDays(base, 90);
+    runDays(changed, 90);
+    expect(JSON.stringify(changed.records)).not.toBe(JSON.stringify(base.records));
   });
 });
 

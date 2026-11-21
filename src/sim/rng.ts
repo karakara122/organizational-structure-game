@@ -36,4 +36,5 @@ export const TAG = {
   mistake: 2,
   approvalFind: 3,
   name: 4,
+  history: 5,
 } as const;

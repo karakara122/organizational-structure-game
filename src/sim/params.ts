@@ -39,7 +39,7 @@ export const JOB_KINDS: Record<JobKind, JobKindSpec> = {
       { step: "inspect", work: 0.5 },
     ],
     limitDays: 10,
-    ratePerDay: 2.4,
+    ratePerDay: 2.6,
   },
   large: {
     label: "大口注文",
@@ -49,7 +49,7 @@ export const JOB_KINDS: Record<JobKind, JobKindSpec> = {
       { step: "inspect", work: 2 },
     ],
     limitDays: 25,
-    ratePerDay: 0.5,
+    ratePerDay: 0.54,
   },
   rush: {
     label: "急ぎ注文",
@@ -58,7 +58,7 @@ export const JOB_KINDS: Record<JobKind, JobKindSpec> = {
       { step: "inspect", work: 0.5 },
     ],
     limitDays: 5,
-    ratePerDay: 0.8,
+    ratePerDay: 0.86,
   },
 };
 
@@ -71,12 +71,12 @@ export const TUNING = {
   normalSkill: 3,
 
   /** 部署長が、直属の部下1人につき1日に使う管理時間(人日)。管理能力3の場合 */
-  manageTimePerSubordinate: 0.08,
+  manageTimePerSubordinate: 0.11,
   /** 管理が足りない・部署長が空席のときの、管理の効きの下限 */
-  manageEffectFloor: 0.7,
+  manageEffectFloor: 0.47,
 
   /** 承認1件に使う時間(人日) */
-  approvalTime: 0.1,
+  approvalTime: 0.05,
   /** 承認でミスを見つける確率 = base + 管理能力 × perManage */
   approvalFindBase: 0.5,
   approvalFindPerManage: 0.08,
@@ -84,8 +84,8 @@ export const TUNING = {
   approvalReworkRatio: 0.5,
 
   /** ミスの確率 = base − 専門能力 × perSkill(0未満にはしない) */
-  mistakeBase: 0.15,
-  mistakePerSkill: 0.02,
+  mistakeBase: 0.33,
+  mistakePerSkill: 0.05,
 
   /** 別の部署へ渡すときにかかる日数 */
   handoffDays: 1,
@@ -96,7 +96,7 @@ export const TUNING = {
 
   /** 給与単位/日 */
   salaryStaff: 1.0,
-  salaryHead: 1.5,
+  salaryHead: 3.0,
   /** 人件費の上限 = シナリオ開始時の人件費 × この値 */
   payrollCapRatio: 1.1,
 
