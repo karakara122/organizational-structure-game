@@ -71,3 +71,13 @@ export function manageEffect(need: number): number {
   const shortage = (need - TUNING.timePerDay) / need;
   return 1 - (1 - TUNING.manageEffectFloor) * Math.min(1, shortage);
 }
+
+/** deptId の部署は、ownerId の部署の中(自分自身か、その下の部署)にあるか */
+export function isWithin(w: World, deptId: number, ownerId: number): boolean {
+  let id: number | null = deptId;
+  while (id !== null) {
+    if (id === ownerId) return true;
+    id = getDept(w, id).parentId;
+  }
+  return false;
+}
