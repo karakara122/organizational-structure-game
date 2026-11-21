@@ -17,3 +17,4 @@
 - **公開リンク**(GitHub Pages を有効にしたあと):`https://karakara122.github.io/organizational-structure-game/`
 - AI向けのコマンド:`npm ci`(最初の1回)/ `npm test`(自動テスト)/ `npm run build`(ビルド)/ `npm run dev`(開発用の画面)
 - 計算の部分は画面と分けて作ります(`src/` の中で、画面のファイルと計算のファイルを別にします)。
+- 計算の部分は `src/sim/` にあります(画面なしで動き、`npm test` で確かめられます)。調整できる数字は `src/sim/params.ts` の1か所だけです(仕様書 6-3 の「つまみの表」と同じもの)。
