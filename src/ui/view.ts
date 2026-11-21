@@ -21,8 +21,8 @@ const esc = (s: string): string =>
 
 const pct = (r: number | null): string => (r === null ? "—" : `${Math.round(r * 100)}%`);
 
-/** 粒を最大この数まで描く。超えた分は「+◯」と書く */
-const MAX_DOTS = 40;
+/** 待ちの棒グラフは、この件数で満タンにする(これ以上たまると端まで赤や黄で埋まる) */
+const BAR_FULL = 30;
 
 function stepOf(j: Job): Step {
   const route = JOB_KINDS[j.kind].route;
@@ -30,122 +30,138 @@ function stepOf(j: Job): Step {
 }
 
 /** 部署ごとの、作業の順番待ちの業務(承認待ちは別に数える) */
-function queuesByDept(w: World): { queue: Record<number, Job[]>; approval: number } {
+function queuesByDept(w: World): { queue: Record<number, Job[]>; approval: number; working: number } {
   const queue: Record<number, Job[]> = {};
   let approval = 0;
+  let working = 0;
   for (const j of w.jobs) {
-    if (j.phase === "approval") {
-      approval++;
-      continue;
+    if (j.phase === "approval") approval++;
+    else if (j.phase === "queued") {
+      if (j.assignee !== null) working++;
+      else (queue[w.stepOwner[stepOf(j)]] ||= []).push(j);
     }
-    if (j.phase !== "queued") continue;
-    (queue[w.stepOwner[stepOf(j)]] ||= []).push(j);
   }
-  return { queue, approval };
+  return { queue, approval, working };
 }
 
-function jobDot(j: Job, day: number): string {
-  const late = j.deadlineDay < day + 1;
-  const near = !late && j.deadlineDay - day <= 2;
-  const cls = late ? "late" : near ? "near" : "ok";
-  const title = `${JOB_KINDS[j.kind].label} 期限 ${j.deadlineDay}日目`;
-  return `<i class="job ${cls} ${j.kind}" title="${esc(title)}"></i>`;
+/** 待ちの棒: 余裕あり(緑)・期限が近い(黄)・期限をすぎた(赤)を、件数に比例した幅で並べる */
+function queueBar(jobs: Job[], day: number): string {
+  let ok = 0;
+  let near = 0;
+  let late = 0;
+  for (const j of jobs) {
+    if (j.deadlineDay < day + 1) late++;
+    else if (j.deadlineDay - day <= 2) near++;
+    else ok++;
+  }
+  const scale = Math.max(jobs.length, BAR_FULL);
+  const seg = (n: number, cls: string): string =>
+    n > 0 ? `<i class="${cls}" style="width:${(n / scale) * 100}%"></i>` : "";
+  return `<div class="bar2" role="img" aria-label="待ち ${jobs.length}件(期限をすぎた ${late}件、期限が近い ${near}件)">${seg(late, "late")}${seg(near, "near")}${seg(ok, "ok")}</div>`;
 }
 
-function deptBox(w: World, d: Dept, q: Record<number, Job[]>, selected: number | null): string {
+function deptCard(w: World, d: Dept, q: Record<number, Job[]>, selected: number | null, depth: number): string {
   const members = w.staff.filter((s) => s.deptId === d.id);
   const steps = STEPS.filter((s) => w.stepOwner[s] === d.id).map((s) => STEP_LABEL[s]);
   const jobs = q[d.id] ?? [];
-  const sorted = [...jobs].sort((a, b) => a.deadlineDay - b.deadlineDay);
-  const dots = sorted.slice(0, MAX_DOTS).map((j) => jobDot(j, w.day)).join("");
-  const more = jobs.length > MAX_DOTS ? `<span class="more">+${jobs.length - MAX_DOTS}</span>` : "";
-  const staffDots = members
-    .map((s) => `<i class="staff ${s.id === d.headId ? "head" : ""}" title="${esc(s.name)}${s.id === d.headId ? "(部署長)" : ""}"></i>`)
-    .join("");
-  const head = d.headId === null ? "部署長 空席" : `部署長 ${esc(getStaff(w, d.headId).name)}`;
-  const children = w.depts.filter((c) => c.parentId === d.id);
-  const sub = children.length
-    ? `<div class="children">${children.map((c) => deptBox(w, c, q, selected)).join("")}</div>`
-    : "";
-  return `<div class="node"><div class="dept ${selected === d.id ? "sel" : ""}" data-dept="${d.id}">
-    <div class="dname">${esc(d.name)} <small>${members.length}人</small></div>
-    <div class="dsub">${head}${steps.length ? ` ・ 受け持ち: ${steps.join("・")}` : ""}</div>
-    <div class="staffs">${staffDots}</div>
-    <div class="queue" title="作業の順番待ち">${dots}${more}<small class="qn">待ち ${jobs.length}件</small></div>
-  </div>${sub}</div>`;
-}
-
-function deptDetail(w: World, id: number, q: Record<number, Job[]>): string {
-  const d = w.depts.find((x) => x.id === id);
-  if (!d) return "";
-  const jobs = q[id] ?? [];
+  const late = jobs.filter((j) => j.deadlineDay < w.day + 1).length;
+  const head = d.headId === null ? "部署長は空席" : `部署長 ${esc(getStaff(w, d.headId).name)}`;
+  const open = selected === d.id;
   const byKind = (["small", "large", "rush"] as const)
     .map((k) => `${JOB_KINDS[k].label} ${jobs.filter((j) => j.kind === k).length}件`)
-    .join(" / ");
-  const late = jobs.filter((j) => j.deadlineDay < w.day + 1).length;
-  return `<div class="detail"><b>${esc(d.name)}</b> の作業の順番待ち: ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。</div>`;
+    .join("<br>");
+  const detail = open
+    ? `<div class="detail"><div>${byKind}</div><div>期限をすぎたもの ${late}件</div>
+        <div class="names">${members.map((s) => `<span class="${s.id === d.headId ? "hd" : ""}">${esc(s.name)}</span>`).join("")}</div></div>`
+    : "";
+  const children = w.depts.filter((c) => c.parentId === d.id);
+  const sub = children.map((c) => deptCard(w, c, q, selected, depth + 1)).join("");
+  return `<div class="branch" style="--depth:${depth}">
+    <button class="card ${open ? "sel" : ""}" data-dept="${d.id}" aria-expanded="${open}">
+      <span class="row1"><b>${esc(d.name)}</b><span class="n">${members.length}人</span></span>
+      <span class="row2">${head}${steps.length ? ` ・ 受け持ち ${steps.join("・")}` : ""}</span>
+      ${queueBar(jobs, w.day)}
+      <span class="row3"><span>待ち <b>${jobs.length}</b>件</span>${late ? `<span class="lt">期限すぎ ${late}件</span>` : ""}</span>
+    </button>${detail}${sub}</div>`;
 }
 
 function resultView(w: World): string {
   const v = verdict(w, payroll(w));
   const label = { success: "成功", close: "惜しい", fail: "失敗" }[v];
   const over = payroll(w) > w.payrollCap + 1e-9;
-  return `<div class="result ${v}"><h2>${label}</h2>
-    <p>最後の30日間の期限内完了率: <b>${pct(finalOnTimeRate(w))}</b>(目標 80%)</p>
-    <p>人件費: ${payroll(w).toFixed(1)} / 上限 ${w.payrollCap.toFixed(1)}${over ? "(上限を超えています)" : ""}</p>
-    <button data-act="restart">もう一度はじめる</button></div>`;
+  return `<section class="result ${v}"><h2>${label}</h2>
+    <p>最後の30日間の期限内完了率 <b>${pct(finalOnTimeRate(w))}</b>(目標 80%)</p>
+    <p>人件費 ${payroll(w).toFixed(1)} / 上限 ${w.payrollCap.toFixed(1)}${over ? "(上限を超えています)" : ""}</p>
+    <button class="primary" data-act="restart">もう一度はじめる</button></section>`;
 }
 
 export function render(w: World, speed: Speed, selected: number | null): string {
-  const { queue, approval } = queuesByDept(w);
+  const { queue, approval, working } = queuesByDept(w);
   const over = isScenarioOver(w);
   const last = w.records[w.records.length - 1];
   const rate = last ? last.onTimeRate : onTimeRate(w); // 始める前は、今の会社の状態を見せる
   const roots = w.depts.filter((d) => d.parentId === null);
-  const btn = (s: Speed, label: string): string =>
-    `<button data-speed="${s}" class="${speed === s ? "on" : ""}" ${over ? "disabled" : ""}>${label}</button>`;
+  const day = Math.min(w.day, TUNING.scenarioDays);
   const pay = payroll(w);
+  const ontrack = rate !== null && rate >= 0.8;
+  const btn = (sp: Speed, label: string): string =>
+    `<button data-speed="${sp}" class="${speed === sp ? "on" : ""}" ${over ? "disabled" : ""}>${label}</button>`;
+  const allLate = Object.values(queue).reduce((a, js) => a + js.filter((j) => j.deadlineDay < w.day + 1).length, 0);
   return `
-  <header class="bar">
-    <span class="title">組織構造ゲーム</span>
-    <span>${Math.min(w.day, TUNING.scenarioDays)}日目 / ${TUNING.scenarioDays}日</span>
-    <span class="big">期限内完了率 ${pct(rate)} <small>(目標 80%)</small></span>
-    <span>人件費 ${pay.toFixed(1)} / 上限 ${w.payrollCap.toFixed(1)}</span>
-    <span class="speed">${btn("pause", "一時停止")}${btn("normal", "通常")}${btn("fast", "高速")}</span>
+  <header class="top">
+    <div class="kpi">
+      <div class="rate ${ontrack ? "good" : "bad"}"><small>期限内完了率</small><b>${pct(rate)}</b><small>目標 80%</small></div>
+      <div class="side"><div>${day}日目 / ${TUNING.scenarioDays}日</div>
+        <div class="pay ${pay > w.payrollCap + 1e-9 ? "bad" : ""}">人件費 ${pay.toFixed(1)} / ${w.payrollCap.toFixed(1)}</div></div>
+    </div>
+    <progress max="${TUNING.scenarioDays}" value="${day}"></progress>
+    <div class="speed">${btn("pause", "一時停止")}${btn("normal", "通常")}${btn("fast", "高速")}</div>
   </header>
-  <section class="chart">
-    <div class="company">社長 → ${roots.map((d) => deptBox(w, d, queue, selected)).join("")}</div>
-    <div class="legend"><i class="job ok"></i>余裕あり <i class="job near"></i>期限が近い <i class="job late"></i>期限をすぎた
-      ・ 承認待ち ${approval}件 ・ 粒1つ = 業務1件</div>
-    ${selected !== null ? deptDetail(w, selected, queue) : '<div class="detail">部署をクリックすると、待ちの内訳が出ます。</div>'}
-  </section>
-  ${over ? resultView(w) : ""}`;
+  <main>
+    <div class="tiles"><div><b>${working}</b>作業中</div><div><b>${approval}</b>承認待ち</div><div class="${allLate ? "lt" : ""}"><b>${allLate}</b>期限すぎ</div></div>
+    <h2 class="sec">部署と作業の順番待ち</h2>
+    <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた</div>
+    <div class="tree">${roots.map((d) => deptCard(w, d, queue, selected, 0)).join("")}</div>
+    <p class="hint">部署をタップすると、内訳と職員が出ます。</p>
+    ${over ? resultView(w) : ""}
+  </main>`;
 }
 
 export const STYLE = `
-:root{--bg:#f6f7f9;--fg:#1d2330;--card:#fff;--line:#cfd5df;--ok:#3a8f5c;--near:#d99a1c;--late:#c8392f;--acc:#2f5fb3}
-@media (prefers-color-scheme:dark){:root{--bg:#161a22;--fg:#e6e9ef;--card:#212733;--line:#3a4252;--ok:#58b57e;--near:#e5b04a;--late:#e0605a;--acc:#6f9be3}}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif}
-.bar{display:flex;flex-wrap:wrap;gap:.6rem 1.4rem;align-items:center;padding:.7rem 1rem;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0}
-.title{font-weight:700}.big{font-size:1.2rem;font-weight:700}
-.speed button,.result button{margin-right:.3rem;padding:.35rem .8rem;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;cursor:pointer}
-.speed button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
-.chart{padding:1rem;overflow-x:auto}
-.company{display:flex;align-items:flex-start;gap:.8rem}
-.node{display:flex;flex-direction:column;gap:.6rem}
-.children{display:flex;gap:.6rem;padding-left:1rem;border-left:2px solid var(--line)}
-.dept{background:var(--card);border:2px solid var(--line);border-radius:8px;padding:.5rem .7rem;min-width:11rem;max-width:20rem;cursor:pointer}
-.dept.sel{border-color:var(--acc)}
-.dname{font-weight:700}.dsub{font-size:.78rem;opacity:.75;margin:.15rem 0}
-.staffs{display:flex;flex-wrap:wrap;gap:3px;margin:.3rem 0}
-.staff{width:10px;height:10px;border-radius:50%;background:var(--acc);display:inline-block}
-.staff.head{background:transparent;border:2px solid var(--acc);box-sizing:border-box}
-.queue{display:flex;flex-wrap:wrap;gap:2px;align-items:center;min-height:14px;border-top:1px dashed var(--line);padding-top:.3rem}
-.job{width:8px;height:8px;border-radius:2px;display:inline-block}
-.job.large{width:11px;height:11px}.job.rush{border-radius:50%}
-.job.ok{background:var(--ok)}.job.near{background:var(--near)}.job.late{background:var(--late)}
-.qn,.more{margin-left:.4rem;font-size:.75rem}
-.legend,.detail{margin-top:.8rem;font-size:.85rem}.legend .job{margin:0 .2rem 0 .6rem}
-.result{margin:1rem;padding:1rem 1.4rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
-.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}
+:root{--bg:#f5f6f8;--fg:#1c2230;--sub:#5d6678;--card:#fff;--line:#d3d8e1;--ok:#3a8f5c;--near:#d99a1c;--late:#c8392f;--acc:#2f5fb3;--onacc:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141820;--fg:#e8ebf1;--sub:#9aa3b5;--card:#20262f;--line:#38404f;--ok:#58b57e;--near:#e5b04a;--late:#e0605a;--acc:#6f9be3;--onacc:#10151d;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141820;--fg:#e8ebf1;--sub:#9aa3b5;--card:#20262f;--line:#38404f;--ok:#58b57e;--near:#e5b04a;--late:#e0605a;--acc:#6f9be3;--onacc:#10151d;color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:15px;line-height:1.5}
+#app{max-width:34rem;margin:0 auto}
+.top{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:.6rem max(16px,env(safe-area-inset-left,0px)) .6rem max(16px,env(safe-area-inset-right,0px))}
+.kpi{display:flex;justify-content:space-between;align-items:center;gap:1rem}
+.rate{display:flex;flex-direction:column}.rate b{font-size:2.2rem;line-height:1.1;font-variant-numeric:tabular-nums}
+.rate small,.side{color:var(--sub);font-size:.8rem}.rate.good b{color:var(--ok)}.rate.bad b{color:var(--late)}
+.side{text-align:right;font-variant-numeric:tabular-nums}.pay.bad{color:var(--late);font-weight:700}
+progress{width:100%;height:6px;margin:.5rem 0;accent-color:var(--acc)}
+.speed{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem}
+button{font:inherit;color:var(--fg)}
+.speed button{min-height:44px;border:1px solid var(--line);background:var(--card);border-radius:8px}
+.speed button.on{background:var(--acc);color:var(--onacc);border-color:var(--acc);font-weight:700}
+.speed button:disabled{opacity:.5}
+main{padding:.8rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(safe-area-inset-right,0px))}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;text-align:center;font-size:.8rem;color:var(--sub)}
+.tiles div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.4rem}
+.tiles b{display:block;font-size:1.3rem;color:var(--fg);font-variant-numeric:tabular-nums}.tiles .lt b{color:var(--late)}
+.sec{font-size:1rem;margin:1.2rem 0 .3rem}
+.legend{display:flex;flex-wrap:wrap;gap:.2rem .8rem;align-items:center;font-size:.78rem;color:var(--sub);margin-bottom:.5rem}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:.25rem}
+.ok{background:var(--ok)}.near{background:var(--near)}.late{background:var(--late)}
+.branch{margin-left:calc(var(--depth) * 14px)}
+.card{display:flex;flex-direction:column;gap:.3rem;width:100%;text-align:left;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:.6rem .8rem;margin-bottom:.5rem;cursor:pointer;min-height:44px}
+.card.sel{border-color:var(--acc)}
+.row1{display:flex;justify-content:space-between}.row2{font-size:.8rem;color:var(--sub)}.n{color:var(--sub)}
+.row3{display:flex;justify-content:space-between;font-size:.85rem;font-variant-numeric:tabular-nums}.lt{color:var(--late);font-weight:700}
+.bar2{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--line)}.bar2 i{display:block;height:100%}
+.detail{margin:-.2rem 0 .6rem;padding:.5rem .8rem;background:var(--card);border:1px dashed var(--line);border-radius:8px;font-size:.85rem}
+.names{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}.names span{border:1px solid var(--line);border-radius:12px;padding:0 .5rem}.names .hd{border-color:var(--acc);font-weight:700}
+.hint{font-size:.8rem;color:var(--sub)}
+.result{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
+.result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}
+.primary{width:100%;min-height:48px;border:0;border-radius:8px;background:var(--acc);color:var(--onacc);font-weight:700;cursor:pointer}
 `;
