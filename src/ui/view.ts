@@ -29,7 +29,7 @@ export interface UiState {
   /** 元に戻せる操作があるか */
   canUndo: boolean;
   /** none=ふつう / move=選んだ職員の移し先を選ぶ / reparent=選んだ部署の上の部署を選ぶ */
-  mode: "none" | "move" | "reparent";
+  mode: "none" | "reparent";
   /** 直前の操作の結果 */
   notice: { ok: boolean; text: string } | null;
 }
@@ -92,11 +92,11 @@ function deptNode(w: World, d: Dept, q: Record<number, Job[]>, ui: UiState): str
     : `<span class="hd vac"><span class="ico">${PERSON}</span>空席</span>`;
   const children = w.depts.filter((c) => c.parentId === d.id);
   const kids = children.length ? `<div class="kids">${children.map((c) => deptNode(w, c, q, ui)).join("")}</div>` : "";
-  const target = ui.mode !== "none" && !(ui.mode === "reparent" && ui.selected === d.id) ? "target" : "";
+  const target = (ui.mode === "reparent" || ui.picked.length > 0) && ui.selected !== d.id ? "target" : "";
   // 移す操作の途中は、各カードに「どこへ」を書く
   const here = ui.picked.some((id) => members.some((m) => m.id === id));
   const mv =
-    ui.mode === "move"
+    ui.picked.length > 0
       ? `<span class="mv ${here ? "src" : ""}">${here ? "移動元" : "ここへ移動"}</span>`
       : ui.mode === "reparent"
         ? `<span class="mv ${ui.selected === d.id ? "src" : ""}">${ui.selected === d.id ? "動かす部署" : "この下へ"}</span>`
@@ -104,7 +104,7 @@ function deptNode(w: World, d: Dept, q: Record<number, Job[]>, ui: UiState): str
   // 部署長の管理時間が足りないとき(部下が多すぎる)だけ、印を出す。事実の表示で、提案ではない
   const overloaded =
     headStaff !== null && manageEffect(manageTimeNeeded(subordinateCount(w, d.id), headStaff.manage)) < 1;
-  return `<div class="tn"><button class="card ${ui.selected === d.id ? "sel" : ""} ${target}" data-dept="${d.id}" data-drag="dept" data-id="${d.id}" data-label="${esc(d.name)}" aria-label="${esc(d.name)}">
+  return `<div class="tn"><button class="card ${ui.selected === d.id ? "sel" : ""} ${target}" data-dept="${d.id}" aria-label="${esc(d.name)}">
       ${mv}<b>${esc(d.name)}</b>
       ${head}
       <span class="n">${members.length}人</span>${overloaded ? '<span class="ovl" title="部署長の管理時間が足りません">管理不足</span>' : ""}
@@ -122,8 +122,8 @@ function staffPanel(w: World, id: number): string {
   const ramp = s.rampUntil > w.day ? ` ・ 習熟中(あと${s.rampUntil - w.day}日)` : "";
   return `<div class="spanel"><div><b>${esc(s.name)}</b>${isHeadNow ? "(部署長)" : ""}</div>
     <div class="sk">専門 ${sk} ・ 管理 ${s.manage}${ramp}</div>
-    <div class="acts"><button class="act" data-act="move">ほかの部署へ移す</button>
-      <button class="act" data-act="${isHeadNow ? "unhead" : "head"}">${isHeadNow ? "部署長をやめる" : "部署長にする"}</button></div></div>`;
+    <div class="sk">移す先の部署のカードをタップすると移ります。</div>
+    <div class="acts"><button class="act" data-act="${isHeadNow ? "unhead" : "head"}">${isHeadNow ? "部署長をやめる" : "部署長にする"}</button></div></div>`;
 }
 
 /** 選んだ部署の内訳と操作(木の下に出す) */
@@ -140,7 +140,7 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState)
   const names = members
     .map(
       (m) =>
-        `<button class="chip ${m.id === d.headId ? "hdn" : ""} ${ui.picked.includes(m.id) ? "pk" : ""}" data-staff="${m.id}" data-drag="staff" data-id="${m.id}" data-label="${esc(m.name)}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</button>`,
+        `<button class="chip ${m.id === d.headId ? "hdn" : ""} ${ui.picked.includes(m.id) ? "pk" : ""}" data-staff="${m.id}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</button>`,
     )
     .join("");
   const pickedHere = ui.picked.filter((id) => members.some((m) => m.id === id));
@@ -149,13 +149,13 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState)
       ? staffPanel(w, pickedHere[0]!)
       : pickedHere.length > 1
         ? `<div class="spanel"><div><b>${pickedHere.length}人</b>を選んでいます</div>
-            <div class="acts"><button class="act" data-act="move">まとめて別の部署へ移す</button><button class="act" data-act="clear">選びなおす</button></div></div>`
+            <div class="acts"><span class="sk">移す先の部署のカードをタップすると、まとめて移ります。</span><button class="act" data-act="clear">選びなおす</button></div></div>`
         : "";
   return `<aside class="sheet" aria-label="${esc(d.name)}の職員と操作"><button class="close" data-act="close" aria-label="閉じる">×</button><section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
     <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。</div>
     ${picked}
     <div class="names">${names || "職員はいません"}</div>
-    ${members.length ? '<div class="hint">職員をタップすると選べます(続けてタップすると、複数人を選べます)。選んだ職員は、部署のカードにドラッグして移せます(1人を同じ部署のカードに落とすと部署長になります)。</div>' : ""}
+    ${members.length ? '<div class="hint">職員をタップすると選べます(続けてタップすると、複数人を選べます)。選んだあと、移す先の部署のカードをタップすると移ります。</div>' : ""}
     <div class="acts dacts">
       <span class="newd"><input id="newname" value="新部署${w.nextDeptId}" maxlength="10" aria-label="新しい部署の名前"><button class="act" data-act="create">この下に部署を作る</button></span>
       <button class="act" data-act="reparent">上の部署を変える</button>
@@ -173,7 +173,7 @@ function stepSettings(w: World, q: Record<number, Job[]>): string {
     const apprOpts = (["none", "head", "above"] as const)
       .map((c) => `<option value="${c}" ${c === w.approval[st] ? "selected" : ""}>${APPROVAL_LABEL[c]}</option>`)
       .join("");
-    return `<div class="srow"><b class="grip" data-drag="step" data-id="${st}" data-label="${STEP_LABEL[st]}の担当" title="部署のカードに落とすと、担当になります">⠿ ${STEP_LABEL[st]}</b>
+    return `<div class="srow"><b>${STEP_LABEL[st]}</b>
       <label>担当<select data-owner="${st}">${deptOpts}</select></label>
       <label>承認<select data-appr="${st}">${apprOpts}</select></label>
       <em class="${n >= 10 ? "jam" : ""}">待ち ${n}件</em></div>`;
@@ -206,8 +206,8 @@ export function render(w: World, ui: UiState): string {
   const allLate = Object.values(queue).reduce((a, js) => a + js.filter((j) => j.deadlineDay < w.day + 1).length, 0);
   const pickedNames = ui.picked.map((id) => w.staff.find((x) => x.id === id)?.name ?? "");
   const banner =
-    ui.mode === "move" && pickedNames.length
-      ? `<div class="banner">${pickedNames.length === 1 ? esc(pickedNames[0]!) : `${pickedNames.length}人`} を移す先の部署をタップ <button class="act" data-act="cancel">やめる</button></div>`
+    pickedNames.length > 0 && ui.mode !== "reparent"
+      ? `<div class="banner">${pickedNames.length === 1 ? esc(pickedNames[0]!) : `${pickedNames.length}人`} を移す先の部署をタップ <button class="act" data-act="clear">やめる</button></div>`
       : ui.mode === "reparent" && selected !== null
         ? `<div class="banner">${esc(w.depts.find((d) => d.id === selected)?.name ?? "")} の上の部署をタップ(一番上にするなら「社長」) <button class="act" data-act="cancel">やめる</button></div>`
         : "";
@@ -234,7 +234,7 @@ export function render(w: World, ui: UiState): string {
       <div class="kids">${roots.map((d) => deptNode(w, d, queue, ui)).join("")}</div></div></div>
     <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
     ${notice}
-    ${selected !== null ? "" : '<p class="hint">部署をタップすると、下から職員と操作が出ます。職員・部署・工程名は、部署のカードにドラッグして落とせます。</p>'}
+    ${selected !== null ? "" : '<p class="hint">部署をタップすると、下から職員と操作が出ます。職員を選んで、移す先の部署をタップすると移せます。</p>'}
     ${stepSettings(w, queue)}
     <p class="status">作業中 <b>${working}</b>件 ・ 承認待ち <b>${approval}</b>件 ・ <span class="${allLate ? "lt" : ""}">期限すぎ <b>${allLate}</b>件</span></p>
     ${over ? resultView(w) : ""}
@@ -312,11 +312,6 @@ button.president{border:0;font:inherit}
 .srow label{display:flex;flex-direction:column;color:var(--sub);font-size:.7rem}
 .srow select{min-height:36px;font:inherit;font-size:.85rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
 .srow em{grid-column:2/4;font-style:normal;color:var(--sub);font-variant-numeric:tabular-nums}.srow em.jam{color:var(--late);font-weight:700}
-.card[data-drag],.chip[data-drag],.grip{cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
-.dragging .card,.dragging .president{outline:2px dashed var(--line);outline-offset:2px}
-.dragging .drop{outline:3px solid var(--acc)!important;background:color-mix(in srgb,var(--acc) 15%,var(--card))}
-.ghost{position:fixed;z-index:50;pointer-events:none;transform:translate(-50%,-120%);background:var(--acc);color:var(--onacc);padding:.3rem .7rem;border-radius:14px;font-size:.85rem;box-shadow:0 4px 12px #0004;white-space:nowrap}
-.grip{display:inline-block}
 .undo-only{margin:.3rem 0}
 .undo{min-height:32px;white-space:nowrap}
 .mv{font-size:.66rem;color:var(--acc);font-weight:700}.mv.src{color:var(--sub)}

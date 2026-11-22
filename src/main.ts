@@ -14,8 +14,6 @@ import {
   STEP_LABEL,
 } from "./sim";
 import type { ActionResult, ApprovalChoice, Step, World } from "./sim";
-import { setupDrag } from "./ui/drag";
-import type { DragSource, DropTarget } from "./ui/drag";
 import { STYLE, render } from "./ui/view";
 import type { Speed, UiState } from "./ui/view";
 
@@ -70,7 +68,7 @@ if (app) {
     if (need > have) inner.style.zoom = String(Math.max(0.6, have / need));
   };
   const draw = (): void => {
-    if (typing() || drag.busy) return;
+    if (typing()) return;
     app.innerHTML = render(world, ui);
     fitChart();
     // 90日が終わったとき、結果が見える所まで1回だけスクロールする
@@ -156,11 +154,6 @@ if (app) {
       ui.picked = [];
       return true;
     }
-    if (act === "move" && ui.picked.length > 0) {
-      ui.mode = "move";
-      ui.notice = null;
-      return true;
-    }
     if ((act === "head" || act === "unhead") && ui.picked.length === 1) {
       const s = getStaff(world, ui.picked[0]!);
       change(
@@ -204,12 +197,13 @@ if (app) {
     const d = t.closest<HTMLElement>("[data-dept]");
     if (d) {
       const id = Number(d.dataset.dept);
-      if (ui.mode === "move" && ui.picked.length > 0) {
+      // 職員を選んであるときは、別の部署のカードをタップすると、そこへ移す(元の部署は開いたまま)
+      if (ui.picked.length > 0 && id !== ui.selected) {
         moveStaff(ui.picked, id);
-        ui.mode = "none";
         ui.picked = [];
-        return true; // 元の部署を開いたままにする
+        return true;
       }
+      if (ui.picked.length > 0 && id === ui.selected) return true;
       if (ui.mode === "reparent" && ui.selected !== null) {
         if (id === ui.selected) return true;
         const sel = ui.selected;
@@ -225,38 +219,12 @@ if (app) {
     return false;
   };
 
-  /** ドラッグして落としたときの操作 */
-  const onDrop = (src: DragSource, target: DropTarget): void => {
-    if (src.kind === "staff") {
-      if (target.kind !== "dept") return;
-      const sid = Number(src.id);
-      // 選んである職員をつかんだときは、選んである全員を運ぶ
-      const ids = ui.picked.includes(sid) ? ui.picked : [sid];
-      const s = getStaff(world, sid);
-      if (ids.length === 1 && s.deptId === target.id) {
-        change(() => setHead(world, target.id, s.id), `${s.name}を${deptName(target.id)}の部署長にしました`);
-      } else {
-        moveStaff(ids, target.id);
-        ui.picked = [];
-      }
-      // 動かした元の部署を開いたままにする
-    } else if (src.kind === "dept") {
-      const id = Number(src.id);
-      if (target.kind === "root") change(() => setParent(world, id, null), `${deptName(id)}を一番上(社長の直下)にしました`);
-      else if (target.id === id) return;
-      else change(() => setParent(world, id, target.id), `${deptName(id)}を${deptName(target.id)}の下に置きました`);
-    } else {
-      const step = src.id as Step;
-      if (target.kind !== "dept") return;
-      change(() => setStepOwner(world, step, target.id), `${STEP_LABEL[step]}の担当を${deptName(target.id)}にしました`);
-    }
-    ui.mode = "none";
-  };
-  const drag = setupDrag(app, onDrop, () => draw(), (src, label) => (src.kind === "staff" && ui.picked.length > 1 && ui.picked.includes(Number(src.id)) ? `${ui.picked.length}人` : label));
-
   // 日が進んで画面が描き直されても押し損ねないよう、指を離した時点で操作する
   app.addEventListener("pointerup", (e) => {
-    if (e.button !== 0 || drag.active) return;
+    if (e.button !== 0) return;
+    // 入力欄の外をタップしたら、入力を終わらせる(入力中は画面を描き直さないため)
+    const a = document.activeElement as HTMLElement | null;
+    if (a && (a.tagName === "INPUT" || a.tagName === "SELECT") && !(e.target as HTMLElement).closest("input,select")) a.blur();
     if (handle(e.target as HTMLElement)) draw();
   });
   // キーボード(Enter)は click で受ける。マウス・タッチの click は pointerup で済んでいる
