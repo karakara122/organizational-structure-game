@@ -1,5 +1,14 @@
-import { TUNING } from "./params";
+import { JOB_KINDS, STEPS, TUNING, type Step } from "./params";
 import type { Job, World } from "./types";
+import {
+  getDept,
+  getStaff,
+  headOrAbove,
+  isWithin,
+  manageTimeNeeded,
+  presidentSubordinateCount,
+  subordinateCount,
+} from "./org";
 
 /** シナリオの結果(仕様書 4章):最後の30日に期限をむかえた業務の期限内完了率 */
 export function finalOnTimeRate(w: World): number | null {
@@ -67,4 +76,66 @@ export function causeSummary(w: World, day: number = w.day): { count: number; da
     days.rework += j.days.rework;
   }
   return { count: jobs.length, days };
+}
+
+// ---- 画面に事実を見せるための数字(計算には使わない。仕様書 5章) ----
+
+/** 部署長が管理できる部下の目安の人数(管理に使える時間 1.0 ÷ 部下1人あたりの管理時間) */
+export function manageCapacity(manage: number): number {
+  return Math.floor(
+    (TUNING.timePerDay * manage) / (TUNING.manageTimePerSubordinate * TUNING.normalSkill) + 1e-9,
+  );
+}
+
+/** 部署長の部下の数と、管理できる目安の人数。部署長が空席なら null */
+export function manageLoad(w: World, deptId: number): { subordinates: number; capacity: number } | null {
+  const d = getDept(w, deptId);
+  if (d.headId === null) return null;
+  return { subordinates: subordinateCount(w, deptId), capacity: manageCapacity(getStaff(w, d.headId).manage) };
+}
+
+/** その部署の職員が、作業できる工程があるか(工程の担当部署の下にいるか) */
+export function canWork(w: World, deptId: number): boolean {
+  return STEPS.some((st) => isWithin(w, deptId, w.stepOwner[st]));
+}
+
+/** 工程の承認:承認者の名前、承認者が1日に処理できる件数の目安、承認待ちの件数。承認なしなら null */
+export function approvalLoad(
+  w: World,
+  step: Step,
+): { who: string; perDay: number; waiting: number } | null {
+  const mode = w.approval[step];
+  if (mode === "none") return null;
+  const owner = getDept(w, w.stepOwner[step]);
+  const a = headOrAbove(w, mode === "head" ? owner.id : owner.parentId);
+  const need =
+    a.kind === "president"
+      ? manageTimeNeeded(presidentSubordinateCount(w), w.presidentManage)
+      : manageTimeNeeded(subordinateCount(w, headDeptOf(w, a.staff.id)), a.staff.manage);
+  const perDay = Math.max(0, Math.floor((TUNING.timePerDay - need) / TUNING.approvalTime + 1e-9));
+  const waiting = w.jobs.filter(
+    (j) =>
+      j.phase === "approval" &&
+      JOB_KINDS[j.kind].route[Math.min(j.stepIdx, JOB_KINDS[j.kind].route.length - 1)]!.step === step,
+  ).length;
+  return { who: a.kind === "president" ? "社長" : a.staff.name, perDay, waiting };
+}
+
+function headDeptOf(w: World, staffId: number): number {
+  return w.depts.find((d) => d.headId === staffId)!.id;
+}
+
+/** その部署(の担当する工程)の待ちを、職員が何日で片づけるかの目安 = 残りの作業量 ÷ 作業する職員の人数 */
+export function queueDays(w: World, jobs: Job[], ownerDeptId: number): number {
+  const workers = w.staff.filter(
+    (s) => isWithin(w, s.deptId, ownerDeptId) && !w.depts.some((d) => d.headId === s.id),
+  ).length;
+  const work = jobs.reduce((a, j) => a + j.remaining, 0);
+  return workers === 0 ? Infinity : work / workers;
+}
+
+/** 直近 days 日の、業務の発生・完了の件数 */
+export function recentFlow(w: World, days = 7): { arrived: number; completed: number } {
+  const rs = w.records.slice(-days);
+  return { arrived: rs.reduce((a, r) => a + r.arrived, 0), completed: rs.reduce((a, r) => a + r.completed, 0) };
 }

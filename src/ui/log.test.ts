@@ -38,3 +38,42 @@ describe("遅れの原因とプレイ記録", () => {
     expect(all.some((j) => j.returns > 0 || j.caught > 0)).toBe(true);
   });
 });
+
+import { approvalLoad, canWork, createDept, manageLoad, queueDays, recentFlow, assignStaff, stepDay } from "../sim";
+
+describe("画面に見せる事実の数字", () => {
+  it("制作部は、部下13人に対して管理の目安は9人", () => {
+    const w = createInitialWorld(1);
+    const ml = manageLoad(w, w.stepOwner.produce)!;
+    expect(ml.subordinates).toBe(13);
+    expect(ml.capacity).toBe(9);
+  });
+  it("社長の直下に作った部署の職員は、作業できない", () => {
+    const w = createInitialWorld(1);
+    const made = createDept(w, "別", null);
+    if (!made.ok || made.id === undefined) throw new Error("部署が作れません");
+    const newId = made.id;
+    const s = w.staff.find((x) => x.deptId === w.stepOwner.produce && !w.depts.some((d) => d.headId === x.id))!;
+    assignStaff(w, s.id, newId);
+    expect(canWork(w, newId)).toBe(false);
+    expect(canWork(w, w.stepOwner.produce)).toBe(true);
+  });
+  it("承認を部署長にすると、承認者の処理の目安が社長より小さい", () => {
+    const w = createInitialWorld(1);
+    w.approval.produce = "head";
+    const head = approvalLoad(w, "produce")!;
+    w.approval.produce = "above";
+    const pres = approvalLoad(w, "produce")!;
+    expect(head.perDay).toBeLessThan(pres.perDay);
+    w.approval.produce = "none";
+    expect(approvalLoad(w, "produce")).toBeNull();
+  });
+  it("直近7日の発生・完了と、待ちを片づける日数が出る", () => {
+    const w = createInitialWorld(1);
+    for (let i = 0; i < 10; i++) stepDay(w);
+    const f = recentFlow(w);
+    expect(f.arrived).toBeGreaterThan(0);
+    const jobs = w.jobs.filter((j) => j.phase === "queued");
+    expect(queueDays(w, jobs, w.stepOwner.produce)).toBeGreaterThanOrEqual(0);
+  });
+});
