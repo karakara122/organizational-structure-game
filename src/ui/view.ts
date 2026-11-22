@@ -135,22 +135,20 @@ export function render(w: World, speed: Speed, selected: number | null): string 
   return `
   <header class="top">
     <div class="kpi">
-      <div class="rate ${ontrack ? "good" : "bad"}"><small>期限内完了率</small><b>${pct(rate)}</b><small>目標 80%</small></div>
-      <div class="side"><div>${day}日目 / ${TUNING.scenarioDays}日</div>
-        <div class="pay ${pay > w.payrollCap + 1e-9 ? "bad" : ""}">人件費 ${pay.toFixed(1)} / ${w.payrollCap.toFixed(1)}</div></div>
+      <div class="rate ${ontrack ? "good" : "bad"}"><b>${pct(rate)}</b><small>期限内完了率<br>目標 80%</small></div>
+      <div class="side"><div>${day} / ${TUNING.scenarioDays}日</div>
+        <div class="pay ${pay > w.payrollCap + 1e-9 ? "bad" : ""}">人件費 ${pay.toFixed(1)}/${w.payrollCap.toFixed(1)}</div></div>
+      <div class="speed">${btn("pause", "停止")}${btn("normal", "通常")}${btn("fast", "高速")}</div>
     </div>
     <progress max="${TUNING.scenarioDays}" value="${day}"></progress>
-    <div class="speed">${btn("pause", "一時停止")}${btn("normal", "通常")}${btn("fast", "高速")}</div>
   </header>
   <main>
-    <div class="tiles"><div><b>${working}</b>作業中</div><div><b>${approval}</b>承認待ち</div><div class="${allLate ? "lt" : ""}"><b>${allLate}</b>期限すぎ</div></div>
-    <h2 class="sec">仕事の流れ</h2>
-    ${flowStrip(w, queue)}
-    <h2 class="sec">組織</h2>
-    <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
     <div class="chart"><div class="tn rootn"><span class="president"><span class="ico">${PERSON}</span>社長</span>
       <div class="kids">${roots.map((d) => deptNode(w, d, queue, selected)).join("")}</div></div></div>
+    <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
     ${selected !== null ? deptDetail(w, selected, queue) : '<p class="hint">部署をタップすると、職員の名前と待ちの内訳が出ます。</p>'}
+    ${flowStrip(w, queue)}
+    <p class="status">作業中 <b>${working}</b>件 ・ 承認待ち <b>${approval}</b>件 ・ <span class="${allLate ? "lt" : ""}">期限すぎ <b>${allLate}</b>件</span></p>
     ${over ? resultView(w) : ""}
   </main>`;
 }
@@ -161,31 +159,31 @@ export const STYLE = `
 :root[data-theme="dark"]{--bg:#141820;--fg:#e8ebf1;--sub:#9aa3b5;--card:#20262f;--line:#38404f;--ok:#58b57e;--near:#e5b04a;--late:#e0605a;--acc:#6f9be3;--onacc:#10151d;color-scheme:dark}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:15px;line-height:1.5}
 #app{max-width:34rem;margin:0 auto}
-.top{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:.6rem max(16px,env(safe-area-inset-left,0px)) .6rem max(16px,env(safe-area-inset-right,0px))}
-.kpi{display:flex;justify-content:space-between;align-items:center;gap:1rem}
-.rate{display:flex;flex-direction:column}.rate b{font-size:2.2rem;line-height:1.1;font-variant-numeric:tabular-nums}
-.rate small,.side{color:var(--sub);font-size:.8rem}.rate.good b{color:var(--ok)}.rate.bad b{color:var(--late)}
-.side{text-align:right;font-variant-numeric:tabular-nums}.pay.bad{color:var(--late);font-weight:700}
-progress{width:100%;height:6px;margin:.5rem 0;accent-color:var(--acc)}
-.speed{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem}
+.top{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:.4rem max(16px,env(safe-area-inset-left,0px)) 0 max(16px,env(safe-area-inset-right,0px))}
+.kpi{display:flex;align-items:center;gap:.4rem}
+.rate{display:flex;align-items:center;gap:.3rem}.rate small{white-space:nowrap}.rate b{font-size:1.5rem;line-height:1.1;font-variant-numeric:tabular-nums}
+.rate small,.side{color:var(--sub);font-size:.68rem;line-height:1.25}.rate.good b{color:var(--ok)}.rate.bad b{color:var(--late)}
+.side{flex:1;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}.pay.bad{color:var(--late);font-weight:700}
+progress{display:block;width:100%;height:3px;margin:.35rem 0 0;accent-color:var(--acc)}
+.speed{display:flex;gap:.2rem}
 button{font:inherit;color:var(--fg)}
-.speed button{min-height:44px;border:1px solid var(--line);background:var(--card);border-radius:8px}
+.speed button{white-space:nowrap;flex-shrink:0;min-height:36px;padding:0 .4rem;font-size:.8rem;border:1px solid var(--line);background:var(--card);border-radius:8px}
 .speed button.on{background:var(--acc);color:var(--onacc);border-color:var(--acc);font-weight:700}
 .speed button:disabled{opacity:.5}
-main{padding:.8rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(safe-area-inset-right,0px))}
+main{padding:.6rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(safe-area-inset-right,0px))}
 .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;text-align:center;font-size:.8rem;color:var(--sub)}
 .tiles div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.4rem}
 .tiles b{display:block;font-size:1.3rem;color:var(--fg);font-variant-numeric:tabular-nums}.tiles .lt b{color:var(--late)}
 .sec{font-size:1rem;margin:1.2rem 0 .3rem}
-.legend{display:flex;flex-wrap:wrap;gap:.2rem .8rem;align-items:center;font-size:.78rem;color:var(--sub);margin-bottom:.5rem}
+.legend{display:flex;flex-wrap:wrap;gap:.2rem .8rem;align-items:center;font-size:.7rem;color:var(--sub);margin:.2rem 0 .4rem;justify-content:center}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:.25rem}
 .ok{background:var(--ok)}.near{background:var(--near)}.late{background:var(--late)}
-.flow{display:flex;align-items:stretch;gap:.2rem}
-.fc{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.4rem;text-align:center;display:flex;flex-direction:column;font-size:.78rem;color:var(--sub)}
-.fc b{color:var(--fg);font-size:.95rem}.fc em{font-style:normal;font-variant-numeric:tabular-nums}.fc em.jam{color:var(--late);font-weight:700}
-.arw{align-self:center;color:var(--sub);font-size:1.4rem}
+.flow{display:flex;align-items:stretch;gap:.2rem;margin-top:.6rem}.status{font-size:.8rem;color:var(--sub);margin:.4rem 0}.status b{color:var(--fg)}
+.fc{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.2rem .3rem;text-align:center;display:flex;flex-direction:column;font-size:.7rem;color:var(--sub);line-height:1.3}
+.fc b{color:var(--fg);font-size:.8rem}.fc em{font-style:normal;font-variant-numeric:tabular-nums}.fc em.jam{color:var(--late);font-weight:700}
+.arw{align-self:center;color:var(--sub);font-size:1rem}
 .ico{display:inline-block;width:12px;height:14px;color:var(--acc)}.ico svg{width:100%;height:100%;fill:currentColor;display:block}
-.chart{overflow-x:auto;padding:.2rem 0 .6rem}
+.chart{overflow-x:auto;padding:.4rem 0 .4rem;min-height:10.5rem}
 .chart>.tn{width:max-content;margin:0 auto}
 .president{display:inline-flex;align-items:center;gap:.4rem;background:var(--acc);color:var(--onacc);border-radius:999px;padding:.25rem .9rem;font-weight:700}
 .president .ico{color:var(--onacc)}
@@ -201,7 +199,7 @@ main{padding:.8rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(saf
 .kids>.tn:last-child::before{border-right:2px solid var(--line);border-radius:0 6px 0 0}
 .kids>.tn:first-child::after{border-radius:6px 0 0 0}
 .kids>.tn:only-child{padding-top:14px}
-.card{display:flex;flex-direction:column;align-items:center;gap:.15rem;width:6.2rem;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:.4rem .3rem;cursor:pointer;min-height:44px;font-size:.78rem}
+.card{display:flex;flex-direction:column;align-items:center;gap:.2rem;width:6.6rem;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:.4rem .3rem;cursor:pointer;min-height:44px;font-size:.78rem}
 .card b{font-size:.9rem}.card.sel{border-color:var(--acc)}
 .card .n{color:var(--sub);font-size:.72rem}.card .q{font-size:.78rem;font-variant-numeric:tabular-nums}.lt{color:var(--late);font-weight:700}
 .hd{display:inline-flex;align-items:center;gap:.2rem;font-size:.78rem;font-weight:700}.hd.vac{color:var(--late)}.hd.vac .ico{color:var(--late)}
