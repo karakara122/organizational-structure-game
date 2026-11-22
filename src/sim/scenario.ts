@@ -128,6 +128,8 @@ function addHandover(w: World): void {
           doneDay: null,
           days: emptyDays(),
           workedToday: false,
+          returns: 0,
+          caught: 0,
         };
         if (deadline <= 0) {
           const onTime = r(1) < HANDOVER_ON_TIME;

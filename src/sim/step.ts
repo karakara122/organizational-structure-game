@@ -48,6 +48,7 @@ function passStep(w: World, job: Job, day: number, immediate: boolean): void {
       return;
     }
     // 客からの差し戻し:ミスの出た工程を全部やり直す。期限は変わらない
+    job.returns++;
     job.redo = [...new Set(job.flaws)].sort((a, b) => a - b);
     job.flaws = [];
     next = job.redo.shift()!;
@@ -143,6 +144,8 @@ export function stepDay(w: World): DayRecord {
         doneDay: null,
         days: newDays(),
         workedToday: false,
+        returns: 0,
+        caught: 0,
       });
       arrived++;
     }
@@ -219,6 +222,7 @@ export function stepDay(w: World): DayRecord {
         job.remaining = route(job)[job.stepIdx]!.work * TUNING.approvalReworkRatio;
         job.availableOn = day + 1;
         job.reworking = true;
+        job.caught++;
         continue;
       }
       job.flaws.push(job.stepIdx);

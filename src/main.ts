@@ -5,6 +5,7 @@ import {
   createInitialWorld,
   deleteDept,
   getStaff,
+  finalOnTimeRate,
   isScenarioOver,
   setApproval,
   setHead,
@@ -14,6 +15,9 @@ import {
   STEP_LABEL,
 } from "./sim";
 import type { ActionResult, ApprovalChoice, Step, World } from "./sim";
+import { formatLog } from "./ui/log";
+import { clearSave, loadGame, saveGame } from "./ui/save";
+import type { LogEntry } from "./ui/save";
 import { STYLE, render } from "./ui/view";
 import type { Speed, UiState } from "./ui/view";
 
@@ -29,8 +33,28 @@ if (app) {
   style.textContent = STYLE;
   document.head.appendChild(style);
 
-  let world: World = createInitialWorld(SEED);
-  const ui: UiState = { speed: "pause", selected: null, picked: [], canUndo: false, mode: "none", notice: null };
+  // 保存してあれば続きから。なければ最初から
+  const saved = loadGame();
+  let world: World = saved?.world ?? createInitialWorld(SEED);
+  const log: LogEntry[] = saved?.log ?? [];
+  const ui: UiState = {
+    speed: "pause",
+    selected: null,
+    picked: [],
+    canUndo: false,
+    mode: "none",
+    notice: saved && saved.world.day > 0 ? { ok: true, text: `前回の続きです(${saved.world.day}日目)。` } : null,
+    showLate: false,
+    openJob: null,
+    confirmReset: false,
+    copyText: null,
+  };
+  const logAdd = (kind: LogEntry["kind"], text: string): void => {
+    log.push({ day: world.day, kind, text });
+    if (log.length > 2000) log.shift();
+  };
+  const persist = (): void => saveGame(world, log);
+  if (!saved) logAdd("開始", `シード ${SEED} で最初から`);
 
   // 元に戻す: 組織の形(職員の所属・部署・担当・承認)だけを、直前の状態に戻す。進んだ日数や業務は戻らない
   type OrgSnap = Pick<World, "staff" | "depts" | "stepOwner" | "approval" | "nextDeptId">;
@@ -86,6 +110,8 @@ if (app) {
         schedule();
       } else {
         stepDay(world);
+        if (isScenarioOver(world)) logAdd("結果", `90日が終わりました(期限内完了率 ${Math.round((finalOnTimeRate(world) ?? 0) * 100)}%)`);
+        persist();
       }
       draw();
     }, ms);
@@ -93,6 +119,7 @@ if (app) {
 
   const say = (r: ActionResult, okText: string): void => {
     ui.notice = r.ok ? { ok: true, text: okText } : { ok: false, text: r.reason };
+    logAdd(r.ok ? "操作" : "失敗", ui.notice.text);
   };
   const deptName = (id: number): string => world.depts.find((d) => d.id === id)?.name ?? "";
 
@@ -118,15 +145,56 @@ if (app) {
     const sp = t.closest<HTMLElement>("[data-speed]");
     if (sp) {
       ui.speed = sp.dataset.speed as Speed;
+      logAdd("速度", { pause: "停止", normal: "通常", fast: "高速" }[ui.speed]);
       schedule();
       return true;
     }
     const act = t.closest<HTMLElement>("[data-act]")?.dataset.act;
-    if (act === "restart") {
+    if (act === "restart" || act === "reset-yes") {
       world = createInitialWorld(SEED);
-      Object.assign(ui, { speed: "pause", selected: null, picked: [], canUndo: false, mode: "none", notice: null });
+      log.length = 0;
+      logAdd("開始", `シード ${SEED} で最初から`);
+      Object.assign(ui, { speed: "pause", selected: null, picked: [], canUndo: false, mode: "none", notice: null, showLate: false, openJob: null, confirmReset: false, copyText: null });
       undoStack.length = 0;
+      clearSave();
+      persist();
       schedule();
+      return true;
+    }
+    if (act === "reset") {
+      ui.confirmReset = true;
+      return true;
+    }
+    if (act === "reset-no") {
+      ui.confirmReset = false;
+      return true;
+    }
+    if (act === "late") {
+      ui.showLate = !ui.showLate;
+      ui.openJob = null;
+      return true;
+    }
+    if (act === "copylog") {
+      const text = formatLog(world, log);
+      const lines = text.split("\n").length;
+      const fallback = (): void => {
+        ui.speed = "pause"; // 選んだ文字が、描き直しで消えないように止める
+        schedule();
+        ui.copyText = text;
+        draw();
+      };
+      try {
+        void navigator.clipboard.writeText(text).then(
+          () => {
+            ui.copyText = null;
+            ui.notice = { ok: true, text: `記録をコピーしました(${lines}行)。チャットに貼ってください。` };
+            draw();
+          },
+          fallback,
+        );
+      } catch {
+        fallback();
+      }
       return true;
     }
     if (act === "close") {
@@ -144,6 +212,7 @@ if (app) {
       if (prev) {
         Object.assign(world, prev);
         ui.notice = { ok: true, text: "1つ前の組織の形に戻しました" };
+        logAdd("操作", "1つ前の組織の形に戻しました");
         ui.picked = [];
         if (ui.selected !== null && !world.depts.some((d) => d.id === ui.selected)) ui.selected = null;
       }
@@ -186,6 +255,12 @@ if (app) {
       ui.mode = "none";
       return true;
     }
+    const jb = t.closest<HTMLElement>("[data-job]");
+    if (jb) {
+      const id = Number(jb.dataset.job);
+      ui.openJob = ui.openJob === id ? null : id;
+      return true;
+    }
     const st = t.closest<HTMLElement>("[data-staff]");
     if (st) {
       // タップするたびに、選ぶ/選ぶのをやめる(複数人を選べる)
@@ -225,11 +300,17 @@ if (app) {
     // 入力欄の外をタップしたら、入力を終わらせる(入力中は画面を描き直さないため)
     const a = document.activeElement as HTMLElement | null;
     if (a && (a.tagName === "INPUT" || a.tagName === "SELECT") && !(e.target as HTMLElement).closest("input,select")) a.blur();
-    if (handle(e.target as HTMLElement)) draw();
+    if (handle(e.target as HTMLElement)) {
+      persist();
+      draw();
+    }
   });
   // キーボード(Enter)は click で受ける。マウス・タッチの click は pointerup で済んでいる
   app.addEventListener("click", (e) => {
-    if (e.detail === 0 && handle(e.target as HTMLElement)) draw();
+    if (e.detail === 0 && handle(e.target as HTMLElement)) {
+      persist();
+      draw();
+    }
   });
   app.addEventListener("change", (e) => {
     const el = e.target as HTMLSelectElement;
@@ -241,6 +322,7 @@ if (app) {
       change(() => setApproval(world, step, el.value as ApprovalChoice), `${STEP_LABEL[step]}の承認を変えました`);
     } else return;
     el.blur();
+    persist();
     draw();
   });
   draw();
