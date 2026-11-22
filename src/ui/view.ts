@@ -60,29 +60,46 @@ function queueBar(jobs: Job[], day: number): string {
   return `<div class="bar2" role="img" aria-label="待ち ${jobs.length}件(期限をすぎた ${late}件、期限が近い ${near}件)">${seg(late, "late")}${seg(near, "near")}${seg(ok, "ok")}</div>`;
 }
 
-function deptCard(w: World, d: Dept, q: Record<number, Job[]>, selected: number | null, depth: number): string {
+const PERSON = '<svg viewBox="0 0 10 12" aria-hidden="true"><circle cx="5" cy="3" r="2.4"/><path d="M1 12a4 4 0 0 1 8 0z"/></svg>';
+
+function deptNode(w: World, d: Dept, q: Record<number, Job[]>, selected: number | null): string {
   const members = w.staff.filter((s) => s.deptId === d.id);
   const steps = STEPS.filter((s) => w.stepOwner[s] === d.id).map((s) => STEP_LABEL[s]);
   const jobs = q[d.id] ?? [];
   const late = jobs.filter((j) => j.deadlineDay < w.day + 1).length;
-  const head = d.headId === null ? "部署長は空席" : `部署長 ${esc(getStaff(w, d.headId).name)}`;
   const open = selected === d.id;
+  const headStaff = d.headId === null ? null : getStaff(w, d.headId);
+  const head = headStaff
+    ? `<span class="person head"><span class="ico">${PERSON}</span>${esc(headStaff.name)}<em>部署長</em></span>`
+    : `<span class="person vacant"><span class="ico">${PERSON}</span>空席<em>部署長</em></span>`;
+  const others = members.filter((m) => m.id !== d.headId);
+  const crowd = others.map((m) => `<span class="ico" title="${esc(m.name)}">${PERSON}</span>`).join("");
   const byKind = (["small", "large", "rush"] as const)
     .map((k) => `${JOB_KINDS[k].label} ${jobs.filter((j) => j.kind === k).length}件`)
-    .join("<br>");
+    .join(" / ");
   const detail = open
-    ? `<div class="detail"><div>${byKind}</div><div>期限をすぎたもの ${late}件</div>
-        <div class="names">${members.map((s) => `<span class="${s.id === d.headId ? "hd" : ""}">${esc(s.name)}</span>`).join("")}</div></div>`
+    ? `<div class="detail"><div>待ちの内訳: ${byKind}</div><div>期限をすぎたもの ${late}件</div>
+        <div class="names">${others.map((m) => `<span>${esc(m.name)}</span>`).join("")}</div></div>`
     : "";
   const children = w.depts.filter((c) => c.parentId === d.id);
-  const sub = children.map((c) => deptCard(w, c, q, selected, depth + 1)).join("");
-  return `<div class="branch" style="--depth:${depth}">
-    <button class="card ${open ? "sel" : ""}" data-dept="${d.id}" aria-expanded="${open}">
-      <span class="row1"><b>${esc(d.name)}</b><span class="n">${members.length}人</span></span>
-      <span class="row2">${head}${steps.length ? ` ・ 受け持ち ${steps.join("・")}` : ""}</span>
+  const kids = children.length ? `<div class="kids">${children.map((c) => deptNode(w, c, q, selected)).join("")}</div>` : "";
+  return `<div class="tn"><button class="card ${open ? "sel" : ""}" data-dept="${d.id}" aria-expanded="${open}">
+      <span class="row1"><b>${esc(d.name)}</b>${steps.map((x) => `<span class="tag">${x}</span>`).join("")}<span class="n">${members.length}人</span></span>
+      ${head}
+      <span class="crowd">${crowd}</span>
       ${queueBar(jobs, w.day)}
       <span class="row3"><span>待ち <b>${jobs.length}</b>件</span>${late ? `<span class="lt">期限すぎ ${late}件</span>` : ""}</span>
-    </button>${detail}${sub}</div>`;
+    </button>${detail}${kids}</div>`;
+}
+
+/** 仕事の流れ: 工程の順に、受け持つ部署と待ちの件数を矢印でつなぐ */
+function flowStrip(w: World, q: Record<number, Job[]>): string {
+  const cells = STEPS.map((st) => {
+    const owner = w.depts.find((d) => d.id === w.stepOwner[st]);
+    const n = (q[w.stepOwner[st]] ?? []).filter((j) => stepOf(j) === st).length;
+    return `<div class="fc"><b>${STEP_LABEL[st]}</b><span>${owner ? esc(owner.name) : "—"}</span><em class="${n >= 10 ? "jam" : ""}">${n}件待ち</em></div>`;
+  });
+  return `<div class="flow">${cells.join('<span class="arw">›</span>')}</div>`;
 }
 
 function resultView(w: World): string {
@@ -119,10 +136,13 @@ export function render(w: World, speed: Speed, selected: number | null): string 
   </header>
   <main>
     <div class="tiles"><div><b>${working}</b>作業中</div><div><b>${approval}</b>承認待ち</div><div class="${allLate ? "lt" : ""}"><b>${allLate}</b>期限すぎ</div></div>
-    <h2 class="sec">部署と作業の順番待ち</h2>
-    <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた</div>
-    <div class="tree">${roots.map((d) => deptCard(w, d, queue, selected, 0)).join("")}</div>
-    <p class="hint">部署をタップすると、内訳と職員が出ます。</p>
+    <h2 class="sec">仕事の流れ</h2>
+    ${flowStrip(w, queue)}
+    <h2 class="sec">組織</h2>
+    <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
+    <div class="president"><span class="ico">${PERSON}</span>社長</div>
+    <div class="kids roots">${roots.map((d) => deptNode(w, d, queue, selected)).join("")}</div>
+    <p class="hint">部署をタップすると、待ちの内訳と職員の名前が出ます。</p>
     ${over ? resultView(w) : ""}
   </main>`;
 }
@@ -152,10 +172,31 @@ main{padding:.8rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(saf
 .legend{display:flex;flex-wrap:wrap;gap:.2rem .8rem;align-items:center;font-size:.78rem;color:var(--sub);margin-bottom:.5rem}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:.25rem}
 .ok{background:var(--ok)}.near{background:var(--near)}.late{background:var(--late)}
-.branch{margin-left:calc(var(--depth) * 14px)}
+.flow{display:flex;align-items:stretch;gap:.2rem}
+.fc{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.4rem;text-align:center;display:flex;flex-direction:column;font-size:.78rem;color:var(--sub)}
+.fc b{color:var(--fg);font-size:.95rem}.fc em{font-style:normal;font-variant-numeric:tabular-nums}.fc em.jam{color:var(--late);font-weight:700}
+.arw{align-self:center;color:var(--sub);font-size:1.4rem}
+.ico{display:inline-block;width:14px;height:16px;color:var(--acc)}.ico svg{width:100%;height:100%;fill:currentColor;display:block}
+.president{display:inline-flex;align-items:center;gap:.4rem;background:var(--acc);color:var(--onacc);border-radius:999px;padding:.25rem .9rem;font-weight:700}
+.president .ico{color:var(--onacc)}
+.kids{margin-left:12px;padding-left:0}
+.kids.roots{margin-left:0}
+.kids>.tn{position:relative;padding-left:20px;border-left:2px solid var(--line)}
+.kids.roots>.tn{margin-left:20px}
+.kids>.tn::before{content:"";position:absolute;left:-2px;top:0;width:20px;height:24px;border-bottom:2px solid var(--line)}
+.kids>.tn:last-child{border-left-color:transparent}
+.kids>.tn:last-child::before{border-left:2px solid var(--line);border-bottom-left-radius:8px}
+.tn .tn{margin-top:0}
+.tag{font-size:.7rem;border:1px solid var(--line);border-radius:6px;padding:0 .35rem;color:var(--sub);margin-left:.3rem}
+.row1{align-items:center;flex-wrap:wrap;gap:.2rem}.row1 .n{margin-left:auto}
+.person{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem}
+.person.head{font-weight:700}.person.head .ico{width:18px;height:20px}
+.person em{font-style:normal;font-size:.7rem;border:1px solid var(--acc);color:var(--acc);border-radius:6px;padding:0 .3rem}
+.person.vacant{color:var(--late)}.person.vacant .ico{color:var(--late);opacity:.6}
+.crowd{display:flex;flex-wrap:wrap;gap:2px}
 .card{display:flex;flex-direction:column;gap:.3rem;width:100%;text-align:left;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:.6rem .8rem;margin-bottom:.5rem;cursor:pointer;min-height:44px}
 .card.sel{border-color:var(--acc)}
-.row1{display:flex;justify-content:space-between}.row2{font-size:.8rem;color:var(--sub)}.n{color:var(--sub)}
+.row1{display:flex}.row2{font-size:.8rem;color:var(--sub)}.n{color:var(--sub)}
 .row3{display:flex;justify-content:space-between;font-size:.85rem;font-variant-numeric:tabular-nums}.lt{color:var(--late);font-weight:700}
 .bar2{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--line)}.bar2 i{display:block;height:100%}
 .detail{margin:-.2rem 0 .6rem;padding:.5rem .8rem;background:var(--card);border:1px dashed var(--line);border-radius:8px;font-size:.85rem}
