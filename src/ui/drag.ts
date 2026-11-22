@@ -20,6 +20,7 @@ export function setupDrag(
   app: HTMLElement,
   onDrop: (src: DragSource, target: DropTarget) => void,
   onEnd: () => void,
+  labelOf: (src: DragSource, label: string) => string = (_s, l) => l,
 ): DragHandle {
   let pending: { src: DragSource; label: string; x: number; y: number; pointerId: number; touch: boolean; timer?: number } | null = null;
   let ghost: HTMLElement | null = null;
@@ -37,7 +38,7 @@ export function setupDrag(
     app.classList.add("dragging");
     ghost = document.createElement("div");
     ghost.className = "ghost";
-    ghost.textContent = pending.label;
+    ghost.textContent = labelOf(pending.src, pending.label);
     document.body.appendChild(ghost);
     move(x, y);
     raf = requestAnimationFrame(autoScroll);

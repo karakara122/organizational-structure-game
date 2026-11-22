@@ -21,8 +21,10 @@ export interface UiState {
   speed: Speed;
   /** 選んでいる部署 */
   selected: number | null;
-  /** 選んでいる職員 */
-  picked: number | null;
+  /** 選んでいる職員(複数選べる) */
+  picked: number[];
+  /** 元に戻せる操作があるか */
+  canUndo: boolean;
   /** none=ふつう / move=選んだ職員の移し先を選ぶ / reparent=選んだ部署の上の部署を選ぶ */
   mode: "none" | "move" | "reparent";
   /** 直前の操作の結果 */
@@ -124,14 +126,21 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState)
   const names = members
     .map(
       (m) =>
-        `<button class="chip ${m.id === d.headId ? "hdn" : ""} ${ui.picked === m.id ? "pk" : ""}" data-staff="${m.id}" data-drag="staff" data-id="${m.id}" data-label="${esc(m.name)}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</button>`,
+        `<button class="chip ${m.id === d.headId ? "hdn" : ""} ${ui.picked.includes(m.id) ? "pk" : ""}" data-staff="${m.id}" data-drag="staff" data-id="${m.id}" data-label="${esc(m.name)}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</button>`,
     )
     .join("");
-  const picked = ui.picked !== null && members.some((m) => m.id === ui.picked) ? staffPanel(w, ui.picked) : "";
+  const pickedHere = ui.picked.filter((id) => members.some((m) => m.id === id));
+  const picked =
+    pickedHere.length === 1
+      ? staffPanel(w, pickedHere[0]!)
+      : pickedHere.length > 1
+        ? `<div class="spanel"><div><b>${pickedHere.length}人</b>を選んでいます</div>
+            <div class="acts"><button class="act" data-act="move">まとめて別の部署へ移す</button><button class="act" data-act="clear">選びなおす</button></div></div>`
+        : "";
   return `<section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
     <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。</div>
     <div class="names">${names || "職員はいません"}</div>
-    ${members.length ? '<div class="hint">職員をタップすると能力と操作が出ます。部署のカードにドラッグして移せます(同じ部署のカードに落とすと部署長になります)。</div>' : ""}
+    ${members.length ? '<div class="hint">職員をタップすると選べます(続けてタップすると、複数人を選べます)。選んだ職員は、部署のカードにドラッグして移せます(1人を同じ部署のカードに落とすと部署長になります)。</div>' : ""}
     ${picked}
     <div class="acts dacts">
       <span class="newd"><input id="newname" value="新しい部署" maxlength="10" aria-label="新しい部署の名前"><button class="act" data-act="create">この下に部署を作る</button></span>
@@ -181,14 +190,19 @@ export function render(w: World, ui: UiState): string {
   const btn = (sp: Speed, label: string): string =>
     `<button data-speed="${sp}" class="${speed === sp ? "on" : ""}" ${over ? "disabled" : ""}>${label}</button>`;
   const allLate = Object.values(queue).reduce((a, js) => a + js.filter((j) => j.deadlineDay < w.day + 1).length, 0);
-  const pickedStaff = ui.picked === null ? null : w.staff.find((x) => x.id === ui.picked);
+  const pickedNames = ui.picked.map((id) => w.staff.find((x) => x.id === id)?.name ?? "");
   const banner =
-    ui.mode === "move" && pickedStaff
-      ? `<div class="banner">${esc(pickedStaff.name)} を移す先の部署をタップ <button class="act" data-act="cancel">やめる</button></div>`
+    ui.mode === "move" && pickedNames.length
+      ? `<div class="banner">${pickedNames.length === 1 ? esc(pickedNames[0]!) : `${pickedNames.length}人`} を移す先の部署をタップ <button class="act" data-act="cancel">やめる</button></div>`
       : ui.mode === "reparent" && selected !== null
         ? `<div class="banner">${esc(w.depts.find((d) => d.id === selected)?.name ?? "")} の上の部署をタップ(一番上にするなら「社長」) <button class="act" data-act="cancel">やめる</button></div>`
         : "";
-  const notice = ui.notice ? `<div class="notice ${ui.notice.ok ? "okn" : "ngn"}" role="status">${esc(ui.notice.text)}</div>` : "";
+  const undoBtn = ui.canUndo ? ` <button class="act undo" data-act="undo">元に戻す</button>` : "";
+  const notice = ui.notice
+    ? `<div class="notice ${ui.notice.ok ? "okn" : "ngn"}" role="status"><span>${esc(ui.notice.text)}</span>${undoBtn}</div>`
+    : ui.canUndo
+      ? `<div class="notice">${undoBtn}</div>`
+      : "";
   const presTag = ui.mode === "reparent" ? "button" : "span";
   return `
   <header class="top">
@@ -268,7 +282,7 @@ main{padding:.6rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(saf
 .names{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}.names>span{display:inline-flex;align-items:center;gap:.2rem;border:1px solid var(--line);border-radius:12px;padding:0 .5rem}.names .hdn{border-color:var(--acc);font-weight:700}
 .card.target,.president.target{outline:2px dashed var(--acc);outline-offset:2px;cursor:pointer}
 button.president{border:0;font:inherit}
-.chip{display:inline-flex;align-items:center;gap:.2rem;border:1px solid var(--line);border-radius:14px;padding:.2rem .6rem;background:var(--card);min-height:32px;cursor:pointer}
+.chip{display:inline-flex;align-items:center;gap:.2rem;border:1px solid var(--line);border-radius:14px;padding:.2rem .6rem;background:var(--card);min-height:40px;cursor:pointer}
 .chip.hdn{border-color:var(--acc);font-weight:700}.chip.pk{background:var(--acc);color:var(--onacc);border-color:var(--acc)}.chip.pk .ico{color:var(--onacc)}
 .names{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}
 .spanel{margin-top:.5rem;padding:.5rem;border:1px solid var(--acc);border-radius:8px}.sk{font-size:.78rem;color:var(--sub)}
@@ -277,7 +291,7 @@ button.president{border:0;font:inherit}
 .newd{display:flex;gap:.3rem;flex-wrap:wrap;width:100%}.newd input{flex:1;min-width:6rem;min-height:40px;border:1px solid var(--line);border-radius:8px;padding:0 .5rem;font:inherit;background:var(--card);color:var(--fg)}
 .banner{position:sticky;top:3.4rem;z-index:4;background:var(--acc);color:var(--onacc);padding:.4rem .6rem;border-radius:8px;margin-bottom:.4rem;font-size:.85rem;display:flex;gap:.5rem;align-items:center;justify-content:space-between}
 .banner .act{min-height:32px;color:var(--fg)}
-.notice{margin:.3rem 0;padding:.4rem .6rem;border-radius:8px;font-size:.85rem;border:1px solid var(--line);background:var(--card)}.okn{border-color:var(--ok)}.ngn{border-color:var(--late);color:var(--late)}
+.notice{display:flex;gap:.5rem;align-items:center;justify-content:space-between;margin:.3rem 0;padding:.4rem .6rem;border-radius:8px;font-size:.85rem;border:1px solid var(--line);background:var(--card)}.okn{border-color:var(--ok)}.ngn{border-color:var(--late);color:var(--late)}
 .steps .sec{font-size:.9rem}
 .srow{display:grid;grid-template-columns:3rem 1fr 1fr;gap:.3rem .5rem;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.4rem .5rem;margin-bottom:.4rem;font-size:.8rem}
 .srow label{display:flex;flex-direction:column;color:var(--sub);font-size:.7rem}
@@ -288,6 +302,7 @@ button.president{border:0;font:inherit}
 .dragging .drop{outline:3px solid var(--acc)!important;background:color-mix(in srgb,var(--acc) 15%,var(--card))}
 .ghost{position:fixed;z-index:50;pointer-events:none;transform:translate(-50%,-120%);background:var(--acc);color:var(--onacc);padding:.3rem .7rem;border-radius:14px;font-size:.85rem;box-shadow:0 4px 12px #0004;white-space:nowrap}
 .grip{display:inline-block}
+.undo{min-height:32px;white-space:nowrap}
 .hint{font-size:.8rem;color:var(--sub)}
 .result{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
 .result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}
