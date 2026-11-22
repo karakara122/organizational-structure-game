@@ -64,32 +64,40 @@ const PERSON = '<svg viewBox="0 0 10 12" aria-hidden="true"><circle cx="5" cy="3
 
 function deptNode(w: World, d: Dept, q: Record<number, Job[]>, selected: number | null): string {
   const members = w.staff.filter((s) => s.deptId === d.id);
-  const steps = STEPS.filter((s) => w.stepOwner[s] === d.id).map((s) => STEP_LABEL[s]);
   const jobs = q[d.id] ?? [];
   const late = jobs.filter((j) => j.deadlineDay < w.day + 1).length;
-  const open = selected === d.id;
   const headStaff = d.headId === null ? null : getStaff(w, d.headId);
   const head = headStaff
-    ? `<span class="person head"><span class="ico">${PERSON}</span>${esc(headStaff.name)}<em>部署長</em></span>`
-    : `<span class="person vacant"><span class="ico">${PERSON}</span>空席<em>部署長</em></span>`;
-  const others = members.filter((m) => m.id !== d.headId);
-  const crowd = others.map((m) => `<span class="ico" title="${esc(m.name)}">${PERSON}</span>`).join("");
+    ? `<span class="hd"><span class="ico">${PERSON}</span>${esc(headStaff.name.split(" ")[0])}</span>`
+    : `<span class="hd vac"><span class="ico">${PERSON}</span>空席</span>`;
+  const children = w.depts.filter((c) => c.parentId === d.id);
+  const kids = children.length ? `<div class="kids">${children.map((c) => deptNode(w, c, q, selected)).join("")}</div>` : "";
+  return `<div class="tn"><button class="card ${selected === d.id ? "sel" : ""}" data-dept="${d.id}" aria-label="${esc(d.name)}">
+      <b>${esc(d.name)}</b>
+      ${head}
+      <span class="n">${members.length}人</span>
+      ${queueBar(jobs, w.day)}
+      <span class="q ${late ? "lt" : ""}">待ち ${jobs.length}</span>
+    </button>${kids}</div>`;
+}
+
+/** 選んだ部署の内訳(木の下に出す) */
+function deptDetail(w: World, id: number, q: Record<number, Job[]>): string {
+  const d = w.depts.find((x) => x.id === id);
+  if (!d) return "";
+  const members = w.staff.filter((s) => s.deptId === d.id);
+  const steps = STEPS.filter((s) => w.stepOwner[s] === d.id).map((s) => STEP_LABEL[s]);
+  const jobs = q[id] ?? [];
+  const late = jobs.filter((j) => j.deadlineDay < w.day + 1).length;
   const byKind = (["small", "large", "rush"] as const)
     .map((k) => `${JOB_KINDS[k].label} ${jobs.filter((j) => j.kind === k).length}件`)
     .join(" / ");
-  const detail = open
-    ? `<div class="detail"><div>待ちの内訳: ${byKind}</div><div>期限をすぎたもの ${late}件</div>
-        <div class="names">${others.map((m) => `<span>${esc(m.name)}</span>`).join("")}</div></div>`
-    : "";
-  const children = w.depts.filter((c) => c.parentId === d.id);
-  const kids = children.length ? `<div class="kids">${children.map((c) => deptNode(w, c, q, selected)).join("")}</div>` : "";
-  return `<div class="tn"><button class="card ${open ? "sel" : ""}" data-dept="${d.id}" aria-expanded="${open}">
-      <span class="row1"><b>${esc(d.name)}</b>${steps.map((x) => `<span class="tag">${x}</span>`).join("")}<span class="n">${members.length}人</span></span>
-      ${head}
-      <span class="crowd">${crowd}</span>
-      ${queueBar(jobs, w.day)}
-      <span class="row3"><span>待ち <b>${jobs.length}</b>件</span>${late ? `<span class="lt">期限すぎ ${late}件</span>` : ""}</span>
-    </button>${detail}${kids}</div>`;
+  const names = members
+    .map((m) => `<span class="${m.id === d.headId ? "hdn" : ""}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</span>`)
+    .join("");
+  return `<section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
+    <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。</div>
+    <div class="names">${names || "職員はいません"}</div></section>`;
 }
 
 /** 仕事の流れ: 工程の順に、受け持つ部署と待ちの件数を矢印でつなぐ */
@@ -140,9 +148,9 @@ export function render(w: World, speed: Speed, selected: number | null): string 
     ${flowStrip(w, queue)}
     <h2 class="sec">組織</h2>
     <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
-    <div class="president"><span class="ico">${PERSON}</span>社長</div>
-    <div class="kids roots">${roots.map((d) => deptNode(w, d, queue, selected)).join("")}</div>
-    <p class="hint">部署をタップすると、待ちの内訳と職員の名前が出ます。</p>
+    <div class="chart"><div class="tn rootn"><span class="president"><span class="ico">${PERSON}</span>社長</span>
+      <div class="kids">${roots.map((d) => deptNode(w, d, queue, selected)).join("")}</div></div></div>
+    ${selected !== null ? deptDetail(w, selected, queue) : '<p class="hint">部署をタップすると、職員の名前と待ちの内訳が出ます。</p>'}
     ${over ? resultView(w) : ""}
   </main>`;
 }
@@ -176,31 +184,30 @@ main{padding:.8rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(saf
 .fc{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.4rem;text-align:center;display:flex;flex-direction:column;font-size:.78rem;color:var(--sub)}
 .fc b{color:var(--fg);font-size:.95rem}.fc em{font-style:normal;font-variant-numeric:tabular-nums}.fc em.jam{color:var(--late);font-weight:700}
 .arw{align-self:center;color:var(--sub);font-size:1.4rem}
-.ico{display:inline-block;width:14px;height:16px;color:var(--acc)}.ico svg{width:100%;height:100%;fill:currentColor;display:block}
+.ico{display:inline-block;width:12px;height:14px;color:var(--acc)}.ico svg{width:100%;height:100%;fill:currentColor;display:block}
+.chart{overflow-x:auto;padding:.2rem 0 .6rem}
+.chart>.tn{width:max-content;margin:0 auto}
 .president{display:inline-flex;align-items:center;gap:.4rem;background:var(--acc);color:var(--onacc);border-radius:999px;padding:.25rem .9rem;font-weight:700}
 .president .ico{color:var(--onacc)}
-.kids{margin-left:12px;padding-left:0}
-.kids.roots{margin-left:0}
-.kids>.tn{position:relative;padding-left:20px;border-left:2px solid var(--line)}
-.kids.roots>.tn{margin-left:20px}
-.kids>.tn::before{content:"";position:absolute;left:-2px;top:0;width:20px;height:24px;border-bottom:2px solid var(--line)}
-.kids>.tn:last-child{border-left-color:transparent}
-.kids>.tn:last-child::before{border-left:2px solid var(--line);border-bottom-left-radius:8px}
-.tn .tn{margin-top:0}
-.tag{font-size:.7rem;border:1px solid var(--line);border-radius:6px;padding:0 .35rem;color:var(--sub);margin-left:.3rem}
-.row1{align-items:center;flex-wrap:wrap;gap:.2rem}.row1 .n{margin-left:auto}
-.person{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem}
-.person.head{font-weight:700}.person.head .ico{width:18px;height:20px}
-.person em{font-style:normal;font-size:.7rem;border:1px solid var(--acc);color:var(--acc);border-radius:6px;padding:0 .3rem}
-.person.vacant{color:var(--late)}.person.vacant .ico{color:var(--late);opacity:.6}
-.crowd{display:flex;flex-wrap:wrap;gap:2px}
-.card{display:flex;flex-direction:column;gap:.3rem;width:100%;text-align:left;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:.6rem .8rem;margin-bottom:.5rem;cursor:pointer;min-height:44px}
-.card.sel{border-color:var(--acc)}
-.row1{display:flex}.row2{font-size:.8rem;color:var(--sub)}.n{color:var(--sub)}
-.row3{display:flex;justify-content:space-between;font-size:.85rem;font-variant-numeric:tabular-nums}.lt{color:var(--late);font-weight:700}
-.bar2{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--line)}.bar2 i{display:block;height:100%}
-.detail{margin:-.2rem 0 .6rem;padding:.5rem .8rem;background:var(--card);border:1px dashed var(--line);border-radius:8px;font-size:.85rem}
-.names{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}.names span{border:1px solid var(--line);border-radius:12px;padding:0 .5rem}.names .hd{border-color:var(--acc);font-weight:700}
+/* ピラミッド型の木: 親を上、子を横に並べて線でつなぐ */
+.tn{display:flex;flex-direction:column;align-items:center;position:relative;padding:14px 4px 0}
+.rootn{padding-top:0}
+.kids{display:flex;justify-content:center;position:relative}
+.kids::before{content:"";position:absolute;top:0;left:50%;height:14px;border-left:2px solid var(--line)}
+.kids>.tn::before,.kids>.tn::after{content:"";position:absolute;top:0;width:50%;height:14px;border-top:2px solid var(--line)}
+.kids>.tn::before{right:50%}.kids>.tn::after{left:50%;border-left:2px solid var(--line)}
+.kids>.tn:only-child::before,.kids>.tn:only-child::after{display:none}
+.kids>.tn:first-child::before,.kids>.tn:last-child::after{border:0 none}
+.kids>.tn:last-child::before{border-right:2px solid var(--line);border-radius:0 6px 0 0}
+.kids>.tn:first-child::after{border-radius:6px 0 0 0}
+.kids>.tn:only-child{padding-top:14px}
+.card{display:flex;flex-direction:column;align-items:center;gap:.15rem;width:6.2rem;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:.4rem .3rem;cursor:pointer;min-height:44px;font-size:.78rem}
+.card b{font-size:.9rem}.card.sel{border-color:var(--acc)}
+.card .n{color:var(--sub);font-size:.72rem}.card .q{font-size:.78rem;font-variant-numeric:tabular-nums}.lt{color:var(--late);font-weight:700}
+.hd{display:inline-flex;align-items:center;gap:.2rem;font-size:.78rem;font-weight:700}.hd.vac{color:var(--late)}.hd.vac .ico{color:var(--late)}
+.bar2{display:flex;height:8px;width:100%;border-radius:4px;overflow:hidden;background:var(--line)}.bar2 i{display:block;height:100%}
+.detail{margin-top:.4rem;padding:.6rem .8rem;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:.85rem}
+.names{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}.names>span{display:inline-flex;align-items:center;gap:.2rem;border:1px solid var(--line);border-radius:12px;padding:0 .5rem}.names .hdn{border-color:var(--acc);font-weight:700}
 .hint{font-size:.8rem;color:var(--sub)}
 .result{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
 .result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}
