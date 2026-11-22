@@ -88,7 +88,7 @@ function deptNode(w: World, d: Dept, q: Record<number, Job[]>, ui: UiState): str
   const children = w.depts.filter((c) => c.parentId === d.id);
   const kids = children.length ? `<div class="kids">${children.map((c) => deptNode(w, c, q, ui)).join("")}</div>` : "";
   const target = ui.mode !== "none" && !(ui.mode === "reparent" && ui.selected === d.id) ? "target" : "";
-  return `<div class="tn"><button class="card ${ui.selected === d.id ? "sel" : ""} ${target}" data-dept="${d.id}" aria-label="${esc(d.name)}">
+  return `<div class="tn"><button class="card ${ui.selected === d.id ? "sel" : ""} ${target}" data-dept="${d.id}" data-drag="dept" data-id="${d.id}" data-label="${esc(d.name)}" aria-label="${esc(d.name)}">
       <b>${esc(d.name)}</b>
       ${head}
       <span class="n">${members.length}人</span>
@@ -124,14 +124,14 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState)
   const names = members
     .map(
       (m) =>
-        `<button class="chip ${m.id === d.headId ? "hdn" : ""} ${ui.picked === m.id ? "pk" : ""}" data-staff="${m.id}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</button>`,
+        `<button class="chip ${m.id === d.headId ? "hdn" : ""} ${ui.picked === m.id ? "pk" : ""}" data-staff="${m.id}" data-drag="staff" data-id="${m.id}" data-label="${esc(m.name)}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</button>`,
     )
     .join("");
   const picked = ui.picked !== null && members.some((m) => m.id === ui.picked) ? staffPanel(w, ui.picked) : "";
   return `<section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
     <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。</div>
     <div class="names">${names || "職員はいません"}</div>
-    ${members.length ? '<div class="hint">職員をタップすると、能力と操作が出ます。</div>' : ""}
+    ${members.length ? '<div class="hint">職員をタップすると能力と操作が出ます。部署のカードにドラッグして移せます(同じ部署のカードに落とすと部署長になります)。</div>' : ""}
     ${picked}
     <div class="acts dacts">
       <span class="newd"><input id="newname" value="新しい部署" maxlength="10" aria-label="新しい部署の名前"><button class="act" data-act="create">この下に部署を作る</button></span>
@@ -150,7 +150,7 @@ function stepSettings(w: World, q: Record<number, Job[]>): string {
     const apprOpts = (["none", "head", "above"] as const)
       .map((c) => `<option value="${c}" ${c === w.approval[st] ? "selected" : ""}>${APPROVAL_LABEL[c]}</option>`)
       .join("");
-    return `<div class="srow"><b>${STEP_LABEL[st]}</b>
+    return `<div class="srow"><b class="grip" data-drag="step" data-id="${st}" data-label="${STEP_LABEL[st]}の担当" title="部署のカードに落とすと、担当になります">⠿ ${STEP_LABEL[st]}</b>
       <label>担当<select data-owner="${st}">${deptOpts}</select></label>
       <label>承認<select data-appr="${st}">${apprOpts}</select></label>
       <em class="${n >= 10 ? "jam" : ""}">待ち ${n}件</em></div>`;
@@ -206,7 +206,7 @@ export function render(w: World, ui: UiState): string {
       <div class="kids">${roots.map((d) => deptNode(w, d, queue, ui)).join("")}</div></div></div>
     <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
     ${notice}
-    ${selected !== null ? deptDetail(w, selected, queue, ui) : '<p class="hint">部署をタップすると、職員と操作が出ます。</p>'}
+    ${selected !== null ? deptDetail(w, selected, queue, ui) : '<p class="hint">部署をタップすると、職員と操作が出ます。職員・部署・工程名は、部署のカードにドラッグして落とせます。</p>'}
     ${stepSettings(w, queue)}
     <p class="status">作業中 <b>${working}</b>件 ・ 承認待ち <b>${approval}</b>件 ・ <span class="${allLate ? "lt" : ""}">期限すぎ <b>${allLate}</b>件</span></p>
     ${over ? resultView(w) : ""}
@@ -283,6 +283,11 @@ button.president{border:0;font:inherit}
 .srow label{display:flex;flex-direction:column;color:var(--sub);font-size:.7rem}
 .srow select{min-height:36px;font:inherit;font-size:.85rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
 .srow em{grid-column:2/4;font-style:normal;color:var(--sub);font-variant-numeric:tabular-nums}.srow em.jam{color:var(--late);font-weight:700}
+.card[data-drag],.chip[data-drag],.grip{cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.dragging .card,.dragging .president{outline:2px dashed var(--line);outline-offset:2px}
+.dragging .drop{outline:3px solid var(--acc)!important;background:color-mix(in srgb,var(--acc) 15%,var(--card))}
+.ghost{position:fixed;z-index:50;pointer-events:none;transform:translate(-50%,-120%);background:var(--acc);color:var(--onacc);padding:.3rem .7rem;border-radius:14px;font-size:.85rem;box-shadow:0 4px 12px #0004;white-space:nowrap}
+.grip{display:inline-block}
 .hint{font-size:.8rem;color:var(--sub)}
 .result{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
 .result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}

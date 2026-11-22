@@ -14,6 +14,8 @@ import {
   STEP_LABEL,
 } from "./sim";
 import type { ActionResult, ApprovalChoice, Step, World } from "./sim";
+import { setupDrag } from "./ui/drag";
+import type { DragSource, DropTarget } from "./ui/drag";
 import { STYLE, render } from "./ui/view";
 import type { Speed, UiState } from "./ui/view";
 
@@ -39,7 +41,7 @@ if (app) {
   };
   /** 入力や選択の途中は、画面を描き直さない(日は進み続ける) */
   const draw = (): void => {
-    if (typing()) return;
+    if (typing() || drag.busy) return;
     app.innerHTML = render(world, ui);
   };
   const schedule = (): void => {
@@ -146,9 +148,35 @@ if (app) {
     return false;
   };
 
+  /** ドラッグして落としたときの操作 */
+  const onDrop = (src: DragSource, target: DropTarget): void => {
+    if (src.kind === "staff") {
+      if (target.kind !== "dept") return;
+      const s = getStaff(world, Number(src.id));
+      if (s.deptId === target.id) {
+        say(setHead(world, target.id, s.id), `${s.name}を${deptName(target.id)}の部署長にしました`);
+      } else {
+        say(assignStaff(world, s.id, target.id), `${s.name}を${deptName(target.id)}に移しました(数日は慣れるまで能率が下がります)`);
+        ui.picked = null;
+      }
+      ui.selected = target.id;
+    } else if (src.kind === "dept") {
+      const id = Number(src.id);
+      if (target.kind === "root") say(setParent(world, id, null), `${deptName(id)}を一番上(社長の直下)にしました`);
+      else if (target.id === id) return;
+      else say(setParent(world, id, target.id), `${deptName(id)}を${deptName(target.id)}の下に置きました`);
+    } else {
+      const step = src.id as Step;
+      if (target.kind !== "dept") return;
+      say(setStepOwner(world, step, target.id), `${STEP_LABEL[step]}の担当を${deptName(target.id)}にしました`);
+    }
+    ui.mode = "none";
+  };
+  const drag = setupDrag(app, onDrop, () => draw());
+
   // 日が進んで画面が描き直されても押し損ねないよう、指を離した時点で操作する
   app.addEventListener("pointerup", (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || drag.active) return;
     if (handle(e.target as HTMLElement)) draw();
   });
   // キーボード(Enter)は click で受ける。マウス・タッチの click は pointerup で済んでいる
