@@ -5,17 +5,23 @@ import {
   STEP_LABEL,
   STEPS,
   TUNING,
+  approvalLoad,
+  canWork,
   causeSummary,
   finalOnTimeRate,
   lateDays,
   lateJobs,
   getStaff,
   manageEffect,
+  manageLoad,
   manageTimeNeeded,
   subordinateCount,
   isScenarioOver,
+  isWithin,
   onTimeRate,
   payroll,
+  queueDays,
+  recentFlow,
   verdict,
 } from "../sim";
 import type { Dept, Job, Step, World } from "../sim";
@@ -51,8 +57,8 @@ const esc = (s: string): string =>
 
 const pct = (r: number | null): string => (r === null ? "—" : `${Math.round(r * 100)}%`);
 
-/** 待ちの棒グラフは、この件数で満タンにする(これ以上たまると端まで赤や黄で埋まる) */
-const BAR_FULL = 30;
+/** 待ちの棒グラフは、残りの作業量が「職員1人あたり この日数ぶん」で満タンになる(これ以上は端まで埋まる) */
+const BAR_FULL_DAYS = 5;
 
 function stepOf(j: Job): Step {
   const route = JOB_KINDS[j.kind].route;
@@ -74,20 +80,36 @@ function queuesByDept(w: World): { queue: Record<number, Job[]>; approval: numbe
   return { queue, approval, working };
 }
 
-/** 待ちの棒: 余裕あり(緑)・期限が近い(黄)・期限をすぎた(赤)を、件数に比例した幅で並べる */
-function queueBar(jobs: Job[], day: number): string {
+/** 待ちの棒: 余裕あり(緑)・期限が近い(黄)・期限をすぎた(赤)を、残りの作業量に比例した幅で並べる */
+function queueBar(jobs: Job[], day: number, workers: number): string {
   let ok = 0;
   let near = 0;
   let late = 0;
+  let nLate = 0;
+  let nNear = 0;
   for (const j of jobs) {
-    if (j.deadlineDay < day + 1) late++;
-    else if (j.deadlineDay - day <= 2) near++;
-    else ok++;
+    if (j.deadlineDay < day + 1) {
+      late += j.remaining;
+      nLate++;
+    } else if (j.deadlineDay - day <= 2) {
+      near += j.remaining;
+      nNear++;
+    } else ok += j.remaining;
   }
-  const scale = Math.max(jobs.length, BAR_FULL);
+  const total = late + near + ok;
+  // 作業する職員がいないのに待ちがあるときは、端まで埋める
+  const full = Math.max(1, workers) * BAR_FULL_DAYS;
+  const scale = workers === 0 && total > 0 ? total : Math.max(total, full);
   const seg = (n: number, cls: string): string =>
     n > 0 ? `<i class="${cls}" style="width:${(n / scale) * 100}%"></i>` : "";
-  return `<div class="bar2" role="img" aria-label="待ち ${jobs.length}件(期限をすぎた ${late}件、期限が近い ${near}件)">${seg(late, "late")}${seg(near, "near")}${seg(ok, "ok")}</div>`;
+  return `<div class="bar2" role="img" aria-label="待ち ${jobs.length}件(期限をすぎた ${nLate}件、期限が近い ${nNear}件)">${seg(late, "late")}${seg(near, "near")}${seg(ok, "ok")}</div>`;
+}
+
+/** 待ちを片づけるのにかかる日数の目安の文字 */
+function daysText(w: World, jobs: Job[], ownerId: number): string {
+  if (jobs.length === 0) return "";
+  const d = queueDays(w, jobs, ownerId);
+  return d === Infinity ? "人なし" : `${d < 10 ? d.toFixed(1) : Math.round(d)}日`;
 }
 
 const PERSON = '<svg viewBox="0 0 10 12" aria-hidden="true"><circle cx="5" cy="3" r="2.4"/><path d="M1 12a4 4 0 0 1 8 0z"/></svg>';
@@ -114,12 +136,16 @@ function deptNode(w: World, d: Dept, q: Record<number, Job[]>, ui: UiState): str
   // 部署長の管理時間が足りないとき(部下が多すぎる)だけ、印を出す。事実の表示で、提案ではない
   const overloaded =
     headStaff !== null && manageEffect(manageTimeNeeded(subordinateCount(w, d.id), headStaff.manage)) < 1;
+  const workers = members.filter((m) => m.id !== d.headId).length;
+  const idle = workers > 0 && !canWork(w, d.id);
+  const owned = STEPS.some((st) => w.stepOwner[st] === d.id);
+  const bw = w.staff.filter((s) => isWithin(w, s.deptId, d.id) && !w.depts.some((x) => x.headId === s.id)).length;
   return `<div class="tn"><button class="card ${ui.selected === d.id ? "sel" : ""} ${target}" data-dept="${d.id}" aria-label="${esc(d.name)}">
       ${mv}<b>${esc(d.name)}</b>
       ${head}
-      <span class="n">${members.length}人</span>${overloaded ? '<span class="ovl" title="部署長の管理時間が足りません">管理不足</span>' : ""}
-      ${queueBar(jobs, w.day)}
-      <span class="q ${late ? "lt" : ""}">待ち ${jobs.length}</span>
+      <span class="n">${members.length}人</span>${overloaded ? '<span class="ovl" title="部署長の管理時間が足りません">管理不足</span>' : ""}${idle ? '<span class="ovl idle" title="担当する工程の下にいないため、職員は作業していません">作業なし</span>' : ""}
+      ${queueBar(jobs, w.day, bw)}
+      <span class="q ${late ? "lt" : ""}">待ち ${jobs.length}${owned && jobs.length ? ` ・${daysText(w, jobs, d.id)}` : ""}</span>
     </button>${kids}</div>`;
 }
 
@@ -134,6 +160,27 @@ function staffPanel(w: World, id: number): string {
     <div class="sk">専門 ${sk} ・ 管理 ${s.manage}${ramp}</div>
     <div class="sk">移す先の部署のカードをタップすると移ります。</div>
     <div class="acts"><button class="act" data-act="${isHeadNow ? "unhead" : "head"}">${isHeadNow ? "部署長をやめる" : "部署長にする"}</button></div></div>`;
+}
+
+/** 部署の状態を、数字で説明する(事実の表示。直し方の提案は出さない) */
+function facts(w: World, d: Dept): string {
+  const out: string[] = [];
+  const ml = manageLoad(w, d.id);
+  if (ml) {
+    const over = ml.subordinates > ml.capacity;
+    out.push(
+      `<div class="fact ${over ? "warn" : ""}">管理: 部署長の部下 ${ml.subordinates}人 / 管理できる目安 ${ml.capacity}人${over ? "。目安を超えていて、部署の職員の能率が下がっています" : ""}</div>`,
+    );
+  } else {
+    out.push('<div class="fact warn">部署長が空席です。部署の職員の能率が下がっています</div>');
+  }
+  const workers = w.staff.filter((s) => s.deptId === d.id && s.id !== d.headId).length;
+  if (workers > 0 && !canWork(w, d.id)) {
+    out.push(
+      '<div class="fact warn">この部署は、担当する工程の下にいないため、職員は作業していません</div>',
+    );
+  }
+  return out.join("");
 }
 
 /** 選んだ部署の内訳と操作(木の下に出す) */
@@ -162,7 +209,8 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState)
             <div class="acts"><span class="sk">移す先の部署のカードをタップすると、まとめて移ります。</span><button class="act" data-act="clear">選びなおす</button></div></div>`
         : "";
   return `<aside class="sheet" aria-label="${esc(d.name)}の職員と操作"><button class="close" data-act="close" aria-label="閉じる">×</button><section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
-    <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。</div>
+    <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。${jobs.length ? (queueDays(w, jobs, d.id) === Infinity ? "作業する職員がいません。" : `片づけるのに約${daysText(w, jobs, d.id)}(残りの作業量 ÷ 作業する職員の人数)。`) : ""}</div>
+    ${facts(w, d)}
     ${picked}
     <div class="names">${names || "職員はいません"}</div>
     ${members.length ? '<div class="hint">職員をタップすると選べます(続けてタップすると、複数人を選べます)。選んだあと、移す先の部署のカードをタップすると移ります。</div>' : ""}
@@ -171,6 +219,26 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState)
       <button class="act" data-act="reparent">上の部署を変える</button>
       <button class="act" data-act="delete">この部署を無くす</button>
     </div></section></aside>`;
+}
+
+/** 承認の状態(事実の表示) */
+function approvalInfo(w: World, st: Step): string {
+  const a = approvalLoad(w, st);
+  if (!a) return "";
+  const jam = a.waiting > a.perDay * 2;
+  return `<div class="afact ${jam ? "warn" : ""}">承認待ち ${a.waiting}件 ・ 承認する${esc(a.who)}が1日に処理できる目安 ${a.perDay}件</div>`;
+}
+
+/** 期限内完了率の推移(小さなグラフ) */
+function trend(w: World): string {
+  const pts = w.records.filter((r) => r.onTimeRate !== null);
+  if (pts.length < 2) return "";
+  const W = 300;
+  const H = 44;
+  const x = (d: number): number => (d / TUNING.scenarioDays) * W;
+  const y = (r: number): number => H - 2 - r * (H - 4);
+  const line = pts.map((r) => `${x(r.day).toFixed(1)},${y(r.onTimeRate!).toFixed(1)}`).join(" ");
+  return `<div class="trendh">期限内完了率の推移(点線は目標80%)</div><svg class="trend" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="期限内完了率の推移(点線は目標80%)"><line x1="0" x2="${W}" y1="${y(0.8)}" y2="${y(0.8)}" class="goal"/><polyline points="${line}" class="ln"/></svg>`;
 }
 
 /** 業務の流れ: 工程の順に、受け持つ部署・承認の方法・待ちの件数を見せ、その場で変えられる */
@@ -186,7 +254,7 @@ function stepSettings(w: World, q: Record<number, Job[]>): string {
     return `<div class="srow"><b>${STEP_LABEL[st]}</b>
       <label>担当<select data-owner="${st}">${deptOpts}</select></label>
       <label>承認<select data-appr="${st}">${apprOpts}</select></label>
-      <em class="${n >= 10 ? "jam" : ""}">待ち ${n}件</em></div>`;
+      <em class="${n >= 10 ? "jam" : ""}">待ち ${n}件</em>${approvalInfo(w, st)}</div>`;
   });
   return `<section class="steps"><h2 class="sec">業務の流れ(見積 → 制作 → 検査)</h2>${rows.join("")}</section>`;
 }
@@ -305,6 +373,8 @@ export function render(w: World, ui: UiState): string {
     ${selected !== null ? "" : '<p class="hint">部署をタップすると、下から職員と操作が出ます。職員を選んで、移す先の部署をタップすると移せます。</p>'}
     ${stepSettings(w, queue)}
     ${causeSection(w, ui)}
+    ${trend(w)}
+    <p class="status">直近7日: 発生 <b>${recentFlow(w).arrived}</b>件 ・ 完了 <b>${recentFlow(w).completed}</b>件</p>
     <p class="status">作業中 <b>${working}</b>件 ・ 承認待ち <b>${approval}</b>件 ・ <span class="${allLate ? "lt" : ""}">期限すぎ <b>${allLate}</b>件</span></p>
     ${over ? resultView(w) : ""}
     ${footer(ui)}
@@ -386,6 +456,10 @@ button.president{border:0;font:inherit}
 .undo{min-height:32px;white-space:nowrap}
 .mv{font-size:.66rem;color:var(--acc);font-weight:700}.mv.src{color:var(--sub)}
 .ovl{font-size:.64rem;color:var(--onacc);background:var(--late);border-radius:6px;padding:0 .3rem}
+.ovl.idle{background:var(--sub)}
+.srow .afact{grid-column:2/4;font-size:.72rem;color:var(--sub)}.afact.warn{color:var(--late);font-weight:700}
+.fact{font-size:.8rem;color:var(--sub);margin:.15rem 0}.fact.warn{color:var(--late);font-weight:700}
+.trendh{font-size:.75rem;color:var(--sub);margin-top:.5rem}.trend{display:block;width:100%;height:44px;margin:.4rem 0 0}.trend .ln{fill:none;stroke:var(--fg);stroke-width:1.6;vector-effect:non-scaling-stroke}.trend .goal{stroke:var(--sub);stroke-dasharray:4 3;stroke-width:1;vector-effect:non-scaling-stroke}
 main.has-sheet{padding-bottom:50vh}
 .sheet{box-sizing:border-box;position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:100%;max-width:34rem;max-height:46vh;overflow-y:auto;z-index:6;background:var(--card);border-top:2px solid var(--acc);border-radius:14px 14px 0 0;box-shadow:0 -6px 18px #0003;padding:.5rem max(16px,env(safe-area-inset-left,0px)) calc(.8rem + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-right,0px))}
 .sheet .detail{margin:0;border:0;padding:0;background:transparent}
