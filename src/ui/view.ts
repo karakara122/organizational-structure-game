@@ -16,6 +16,21 @@ import type { Dept, Job, Step, World } from "../sim";
 
 export type Speed = "pause" | "normal" | "fast";
 
+/** 画面の状態(計算には関係しない、見せ方だけの状態) */
+export interface UiState {
+  speed: Speed;
+  /** 選んでいる部署 */
+  selected: number | null;
+  /** 選んでいる職員 */
+  picked: number | null;
+  /** none=ふつう / move=選んだ職員の移し先を選ぶ / reparent=選んだ部署の上の部署を選ぶ */
+  mode: "none" | "move" | "reparent";
+  /** 直前の操作の結果 */
+  notice: { ok: boolean; text: string } | null;
+}
+
+const APPROVAL_LABEL = { none: "承認なし", head: "部署長", above: "その上の上司" } as const;
+
 const esc = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 
@@ -62,7 +77,7 @@ function queueBar(jobs: Job[], day: number): string {
 
 const PERSON = '<svg viewBox="0 0 10 12" aria-hidden="true"><circle cx="5" cy="3" r="2.4"/><path d="M1 12a4 4 0 0 1 8 0z"/></svg>';
 
-function deptNode(w: World, d: Dept, q: Record<number, Job[]>, selected: number | null): string {
+function deptNode(w: World, d: Dept, q: Record<number, Job[]>, ui: UiState): string {
   const members = w.staff.filter((s) => s.deptId === d.id);
   const jobs = q[d.id] ?? [];
   const late = jobs.filter((j) => j.deadlineDay < w.day + 1).length;
@@ -71,8 +86,9 @@ function deptNode(w: World, d: Dept, q: Record<number, Job[]>, selected: number 
     ? `<span class="hd"><span class="ico">${PERSON}</span>${esc(headStaff.name.split(" ")[0])}</span>`
     : `<span class="hd vac"><span class="ico">${PERSON}</span>空席</span>`;
   const children = w.depts.filter((c) => c.parentId === d.id);
-  const kids = children.length ? `<div class="kids">${children.map((c) => deptNode(w, c, q, selected)).join("")}</div>` : "";
-  return `<div class="tn"><button class="card ${selected === d.id ? "sel" : ""}" data-dept="${d.id}" aria-label="${esc(d.name)}">
+  const kids = children.length ? `<div class="kids">${children.map((c) => deptNode(w, c, q, ui)).join("")}</div>` : "";
+  const target = ui.mode !== "none" && !(ui.mode === "reparent" && ui.selected === d.id) ? "target" : "";
+  return `<div class="tn"><button class="card ${ui.selected === d.id ? "sel" : ""} ${target}" data-dept="${d.id}" aria-label="${esc(d.name)}">
       <b>${esc(d.name)}</b>
       ${head}
       <span class="n">${members.length}人</span>
@@ -81,8 +97,21 @@ function deptNode(w: World, d: Dept, q: Record<number, Job[]>, selected: number 
     </button>${kids}</div>`;
 }
 
-/** 選んだ部署の内訳(木の下に出す) */
-function deptDetail(w: World, id: number, q: Record<number, Job[]>): string {
+function staffPanel(w: World, id: number): string {
+  const s = w.staff.find((x) => x.id === id);
+  if (!s) return "";
+  const d = w.depts.find((x) => x.id === s.deptId);
+  const isHeadNow = d?.headId === s.id;
+  const sk = STEPS.map((st) => `${STEP_LABEL[st]} ${s.skills[st]}`).join(" ・ ");
+  const ramp = s.rampUntil > w.day ? ` ・ 習熟中(あと${s.rampUntil - w.day}日)` : "";
+  return `<div class="spanel"><div><b>${esc(s.name)}</b>${isHeadNow ? "(部署長)" : ""}</div>
+    <div class="sk">専門 ${sk} ・ 管理 ${s.manage}${ramp}</div>
+    <div class="acts"><button class="act" data-act="move">ほかの部署へ移す</button>
+      <button class="act" data-act="${isHeadNow ? "unhead" : "head"}">${isHeadNow ? "部署長をやめる" : "部署長にする"}</button></div></div>`;
+}
+
+/** 選んだ部署の内訳と操作(木の下に出す) */
+function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState): string {
   const d = w.depts.find((x) => x.id === id);
   if (!d) return "";
   const members = w.staff.filter((s) => s.deptId === d.id);
@@ -93,21 +122,40 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>): string {
     .map((k) => `${JOB_KINDS[k].label} ${jobs.filter((j) => j.kind === k).length}件`)
     .join(" / ");
   const names = members
-    .map((m) => `<span class="${m.id === d.headId ? "hdn" : ""}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</span>`)
+    .map(
+      (m) =>
+        `<button class="chip ${m.id === d.headId ? "hdn" : ""} ${ui.picked === m.id ? "pk" : ""}" data-staff="${m.id}"><span class="ico">${PERSON}</span>${esc(m.name)}${m.id === d.headId ? "(部署長)" : ""}</button>`,
+    )
     .join("");
+  const picked = ui.picked !== null && members.some((m) => m.id === ui.picked) ? staffPanel(w, ui.picked) : "";
   return `<section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
     <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。</div>
-    <div class="names">${names || "職員はいません"}</div></section>`;
+    <div class="names">${names || "職員はいません"}</div>
+    ${members.length ? '<div class="hint">職員をタップすると、能力と操作が出ます。</div>' : ""}
+    ${picked}
+    <div class="acts dacts">
+      <span class="newd"><input id="newname" value="新しい部署" maxlength="10" aria-label="新しい部署の名前"><button class="act" data-act="create">この下に部署を作る</button></span>
+      <button class="act" data-act="reparent">上の部署を変える</button>
+      <button class="act" data-act="delete">この部署を無くす</button>
+    </div></section>`;
 }
 
-/** 仕事の流れ: 工程の順に、受け持つ部署と待ちの件数を矢印でつなぐ */
-function flowStrip(w: World, q: Record<number, Job[]>): string {
-  const cells = STEPS.map((st) => {
-    const owner = w.depts.find((d) => d.id === w.stepOwner[st]);
+/** 業務の流れ: 工程の順に、受け持つ部署・承認の方法・待ちの件数を見せ、その場で変えられる */
+function stepSettings(w: World, q: Record<number, Job[]>): string {
+  const rows = STEPS.map((st) => {
     const n = (q[w.stepOwner[st]] ?? []).filter((j) => stepOf(j) === st).length;
-    return `<div class="fc"><b>${STEP_LABEL[st]}</b><span>${owner ? esc(owner.name) : "—"}</span><em class="${n >= 10 ? "jam" : ""}">${n}件待ち</em></div>`;
+    const deptOpts = w.depts
+      .map((d) => `<option value="${d.id}" ${d.id === w.stepOwner[st] ? "selected" : ""}>${esc(d.name)}</option>`)
+      .join("");
+    const apprOpts = (["none", "head", "above"] as const)
+      .map((c) => `<option value="${c}" ${c === w.approval[st] ? "selected" : ""}>${APPROVAL_LABEL[c]}</option>`)
+      .join("");
+    return `<div class="srow"><b>${STEP_LABEL[st]}</b>
+      <label>担当<select data-owner="${st}">${deptOpts}</select></label>
+      <label>承認<select data-appr="${st}">${apprOpts}</select></label>
+      <em class="${n >= 10 ? "jam" : ""}">待ち ${n}件</em></div>`;
   });
-  return `<div class="flow">${cells.join('<span class="arw">›</span>')}</div>`;
+  return `<section class="steps"><h2 class="sec">業務の流れ(見積 → 制作 → 検査)</h2>${rows.join("")}</section>`;
 }
 
 function resultView(w: World): string {
@@ -120,7 +168,8 @@ function resultView(w: World): string {
     <button class="primary" data-act="restart">もう一度はじめる</button></section>`;
 }
 
-export function render(w: World, speed: Speed, selected: number | null): string {
+export function render(w: World, ui: UiState): string {
+  const { speed, selected } = ui;
   const { queue, approval, working } = queuesByDept(w);
   const over = isScenarioOver(w);
   const last = w.records[w.records.length - 1];
@@ -132,6 +181,15 @@ export function render(w: World, speed: Speed, selected: number | null): string 
   const btn = (sp: Speed, label: string): string =>
     `<button data-speed="${sp}" class="${speed === sp ? "on" : ""}" ${over ? "disabled" : ""}>${label}</button>`;
   const allLate = Object.values(queue).reduce((a, js) => a + js.filter((j) => j.deadlineDay < w.day + 1).length, 0);
+  const pickedStaff = ui.picked === null ? null : w.staff.find((x) => x.id === ui.picked);
+  const banner =
+    ui.mode === "move" && pickedStaff
+      ? `<div class="banner">${esc(pickedStaff.name)} を移す先の部署をタップ <button class="act" data-act="cancel">やめる</button></div>`
+      : ui.mode === "reparent" && selected !== null
+        ? `<div class="banner">${esc(w.depts.find((d) => d.id === selected)?.name ?? "")} の上の部署をタップ(一番上にするなら「社長」) <button class="act" data-act="cancel">やめる</button></div>`
+        : "";
+  const notice = ui.notice ? `<div class="notice ${ui.notice.ok ? "okn" : "ngn"}" role="status">${esc(ui.notice.text)}</div>` : "";
+  const presTag = ui.mode === "reparent" ? "button" : "span";
   return `
   <header class="top">
     <div class="kpi">
@@ -143,11 +201,13 @@ export function render(w: World, speed: Speed, selected: number | null): string 
     <progress max="${TUNING.scenarioDays}" value="${day}"></progress>
   </header>
   <main>
-    <div class="chart"><div class="tn rootn"><span class="president"><span class="ico">${PERSON}</span>社長</span>
-      <div class="kids">${roots.map((d) => deptNode(w, d, queue, selected)).join("")}</div></div></div>
+    ${banner}
+    <div class="chart"><div class="tn rootn"><${presTag} class="president ${ui.mode === "reparent" ? "target" : ""}" data-root="1"><span class="ico">${PERSON}</span>社長</${presTag}>
+      <div class="kids">${roots.map((d) => deptNode(w, d, queue, ui)).join("")}</div></div></div>
     <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
-    ${selected !== null ? deptDetail(w, selected, queue) : '<p class="hint">部署をタップすると、職員の名前と待ちの内訳が出ます。</p>'}
-    ${flowStrip(w, queue)}
+    ${notice}
+    ${selected !== null ? deptDetail(w, selected, queue, ui) : '<p class="hint">部署をタップすると、職員と操作が出ます。</p>'}
+    ${stepSettings(w, queue)}
     <p class="status">作業中 <b>${working}</b>件 ・ 承認待ち <b>${approval}</b>件 ・ <span class="${allLate ? "lt" : ""}">期限すぎ <b>${allLate}</b>件</span></p>
     ${over ? resultView(w) : ""}
   </main>`;
@@ -206,6 +266,23 @@ main{padding:.6rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(saf
 .bar2{display:flex;height:8px;width:100%;border-radius:4px;overflow:hidden;background:var(--line)}.bar2 i{display:block;height:100%}
 .detail{margin-top:.4rem;padding:.6rem .8rem;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:.85rem}
 .names{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}.names>span{display:inline-flex;align-items:center;gap:.2rem;border:1px solid var(--line);border-radius:12px;padding:0 .5rem}.names .hdn{border-color:var(--acc);font-weight:700}
+.card.target,.president.target{outline:2px dashed var(--acc);outline-offset:2px;cursor:pointer}
+button.president{border:0;font:inherit}
+.chip{display:inline-flex;align-items:center;gap:.2rem;border:1px solid var(--line);border-radius:14px;padding:.2rem .6rem;background:var(--card);min-height:32px;cursor:pointer}
+.chip.hdn{border-color:var(--acc);font-weight:700}.chip.pk{background:var(--acc);color:var(--onacc);border-color:var(--acc)}.chip.pk .ico{color:var(--onacc)}
+.names{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}
+.spanel{margin-top:.5rem;padding:.5rem;border:1px solid var(--acc);border-radius:8px}.sk{font-size:.78rem;color:var(--sub)}
+.acts{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem}.dacts{border-top:1px dashed var(--line);padding-top:.5rem}
+.act{min-height:40px;padding:0 .8rem;border:1px solid var(--line);background:var(--card);border-radius:8px;cursor:pointer;font-size:.85rem}
+.newd{display:flex;gap:.3rem;flex-wrap:wrap;width:100%}.newd input{flex:1;min-width:6rem;min-height:40px;border:1px solid var(--line);border-radius:8px;padding:0 .5rem;font:inherit;background:var(--card);color:var(--fg)}
+.banner{position:sticky;top:3.4rem;z-index:4;background:var(--acc);color:var(--onacc);padding:.4rem .6rem;border-radius:8px;margin-bottom:.4rem;font-size:.85rem;display:flex;gap:.5rem;align-items:center;justify-content:space-between}
+.banner .act{min-height:32px;color:var(--fg)}
+.notice{margin:.3rem 0;padding:.4rem .6rem;border-radius:8px;font-size:.85rem;border:1px solid var(--line);background:var(--card)}.okn{border-color:var(--ok)}.ngn{border-color:var(--late);color:var(--late)}
+.steps .sec{font-size:.9rem}
+.srow{display:grid;grid-template-columns:3rem 1fr 1fr;gap:.3rem .5rem;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.4rem .5rem;margin-bottom:.4rem;font-size:.8rem}
+.srow label{display:flex;flex-direction:column;color:var(--sub);font-size:.7rem}
+.srow select{min-height:36px;font:inherit;font-size:.85rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+.srow em{grid-column:2/4;font-style:normal;color:var(--sub);font-variant-numeric:tabular-nums}.srow em.jam{color:var(--late);font-weight:700}
 .hint{font-size:.8rem;color:var(--sub)}
 .result{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
 .result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}
