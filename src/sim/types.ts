@@ -62,6 +62,10 @@ export interface Job {
   doneDay: number | null;
   days: JobDays;
   workedToday: boolean;
+  /** 客からの差し戻しを受けた回数(記録だけ。計算には使わない) */
+  returns: number;
+  /** 承認でミスが見つかった回数(記録だけ。計算には使わない) */
+  caught: number;
 }
 
 export interface DayRecord {

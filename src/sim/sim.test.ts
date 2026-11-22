@@ -68,6 +68,8 @@ function addJob(w: World, over: Partial<Job> = {}): Job {
     doneDay: null,
     days: { work: 0, queue: 0, approval: 0, handoff: 0, rework: 0 },
     workedToday: false,
+    returns: 0,
+    caught: 0,
     ...over,
   };
   w.jobs.push(job);

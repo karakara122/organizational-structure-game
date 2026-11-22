@@ -5,7 +5,10 @@ import {
   STEP_LABEL,
   STEPS,
   TUNING,
+  causeSummary,
   finalOnTimeRate,
+  lateDays,
+  lateJobs,
   getStaff,
   manageEffect,
   manageTimeNeeded,
@@ -30,6 +33,13 @@ export interface UiState {
   canUndo: boolean;
   /** none=ふつう / move=選んだ職員の移し先を選ぶ / reparent=選んだ部署の上の部署を選ぶ */
   mode: "none" | "reparent";
+  /** 遅れた業務の一覧を開いているか/開いている業務 */
+  showLate: boolean;
+  openJob: number | null;
+  /** 「最初からやりなおす」の確認中か */
+  confirmReset: boolean;
+  /** 自動でコピーできなかったときに見せる記録の文字 */
+  copyText: string | null;
   /** 直前の操作の結果 */
   notice: { ok: boolean; text: string } | null;
 }
@@ -181,6 +191,64 @@ function stepSettings(w: World, q: Record<number, Job[]>): string {
   return `<section class="steps"><h2 class="sec">業務の流れ(見積 → 制作 → 検査)</h2>${rows.join("")}</section>`;
 }
 
+const CAUSES = [
+  ["work", "作業", "--c-work"],
+  ["queue", "順番待ち", "--c-queue"],
+  ["approval", "承認待ち", "--c-appr"],
+  ["handoff", "受け渡し", "--c-hand"],
+  ["rework", "やり直し", "--c-redo"],
+] as const;
+
+function jobDetail(j: Job): string {
+  const k = JOB_KINDS[j.kind];
+  const where =
+    j.doneDay !== null
+      ? `${j.doneDay}日目に完了`
+      : `まだ終わっていません(今は${STEP_LABEL[stepOf(j)]}の${j.phase === "approval" ? "承認待ち" : "段階"})`;
+  const cells = CAUSES.map(([key, label, color]) => `<span><i style="background:var(${color})"></i>${label} ${j.days[key]}日</span>`).join("");
+  return `<div class="jd"><div>${k.label} #${j.id} ・ ${j.arrivedDay}日目に発生 ・ 期限 ${j.deadlineDay}日目 ・ ${where}</div>
+    <div class="jdd">${cells}</div>
+    <div>客からの差し戻し ${j.returns}回 ・ 承認で見つかったミス ${j.caught}回</div></div>`;
+}
+
+/** 遅れの原因(仕様書 5章)。かかった日数の内訳を見せるだけで、直し方は出さない */
+function causeSection(w: World, ui: UiState): string {
+  const { count, days } = causeSummary(w);
+  if (count === 0) {
+    return `<section class="cause"><h2 class="sec">遅れの原因</h2><p class="hint">直近30日に期限をむかえた業務で、遅れたものはありません。</p></section>`;
+  }
+  const total = CAUSES.reduce((a, [key]) => a + days[key], 0) || 1;
+  const bar = CAUSES.map(([key, , color]) => (days[key] > 0 ? `<i style="width:${(days[key] / total) * 100}%;background:var(${color})"></i>` : "")).join("");
+  const rows = CAUSES.map(
+    ([key, label, color]) =>
+      `<div class="cr"><span><i style="background:var(${color})"></i>${label}</span><b>${Math.round((days[key] / total) * 100)}%</b><em>1件あたり ${(days[key] / count).toFixed(1)}日</em></div>`,
+  ).join("");
+  const list = ui.showLate
+    ? `<div class="ll">${lateJobs(w)
+        .slice(0, 10)
+        .map(
+          (j) =>
+            `<button class="lj ${ui.openJob === j.id ? "open" : ""}" data-job="${j.id}">${JOB_KINDS[j.kind].label} #${j.id} ・ 期限 ${j.deadlineDay}日目 ・ ${lateDays(j, w.day)}日遅れ${j.doneDay === null ? "(未完了)" : ""}</button>${ui.openJob === j.id ? jobDetail(j) : ""}`,
+        )
+        .join("")}${count > 10 ? `<p class="hint">遅れの大きい10件だけ出しています(全部で${count}件)。</p>` : ""}</div>`
+    : "";
+  return `<section class="cause"><h2 class="sec">遅れの原因</h2>
+    <p class="hint">直近30日に期限をむかえて遅れた業務 ${count}件の、かかった日数の内訳です。</p>
+    <div class="cbar" role="img" aria-label="遅れた業務のかかった日数の内訳">${bar}</div>${rows}
+    <button class="act" data-act="late">${ui.showLate ? "遅れた業務を閉じる" : `遅れた業務を見る(${count}件)`}</button>${list}</section>`;
+}
+
+function footer(ui: UiState): string {
+  const reset = ui.confirmReset
+    ? `<span class="confirm">最初からやりなおしますか?<button class="act" data-act="reset-yes">はい</button><button class="act" data-act="reset-no">いいえ</button></span>`
+    : `<button class="act" data-act="reset">最初からやりなおす</button>`;
+  const text =
+    ui.copyText !== null
+      ? `<textarea id="logtext" readonly rows="8" aria-label="プレイ記録">${esc(ui.copyText)}</textarea><p class="hint">自動でコピーできなかったので、ここを全部選んでコピーしてください。</p>`
+      : "";
+  return `<footer class="foot"><button class="act" data-act="copylog">記録をコピー</button>${reset}${text}</footer>`;
+}
+
 function resultView(w: World): string {
   const v = verdict(w, payroll(w));
   const label = { success: "成功", close: "惜しい", fail: "失敗" }[v];
@@ -236,16 +304,18 @@ export function render(w: World, ui: UiState): string {
     ${notice}
     ${selected !== null ? "" : '<p class="hint">部署をタップすると、下から職員と操作が出ます。職員を選んで、移す先の部署をタップすると移せます。</p>'}
     ${stepSettings(w, queue)}
+    ${causeSection(w, ui)}
     <p class="status">作業中 <b>${working}</b>件 ・ 承認待ち <b>${approval}</b>件 ・ <span class="${allLate ? "lt" : ""}">期限すぎ <b>${allLate}</b>件</span></p>
     ${over ? resultView(w) : ""}
+    ${footer(ui)}
   </main>
   ${selected !== null ? deptDetail(w, selected, queue, ui) : ""}`;
 }
 
 export const STYLE = `
-:root{--bg:#f5f6f8;--fg:#1c2230;--sub:#5d6678;--card:#fff;--line:#d3d8e1;--ok:#3a8f5c;--near:#d99a1c;--late:#c8392f;--acc:#2f5fb3;--onacc:#fff}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141820;--fg:#e8ebf1;--sub:#9aa3b5;--card:#20262f;--line:#38404f;--ok:#58b57e;--near:#e5b04a;--late:#e0605a;--acc:#6f9be3;--onacc:#10151d;color-scheme:dark}}
-:root[data-theme="dark"]{--bg:#141820;--fg:#e8ebf1;--sub:#9aa3b5;--card:#20262f;--line:#38404f;--ok:#58b57e;--near:#e5b04a;--late:#e0605a;--acc:#6f9be3;--onacc:#10151d;color-scheme:dark}
+:root{--bg:#f5f6f8;--fg:#1c2230;--sub:#5d6678;--card:#fff;--line:#d3d8e1;--ok:#3a8f5c;--near:#d99a1c;--late:#c8392f;--acc:#2f5fb3;--onacc:#fff;--c-work:#5b7fb8;--c-queue:#d98a2b;--c-appr:#8a63b8;--c-hand:#2f9a96;--c-redo:#c4527a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141820;--fg:#e8ebf1;--sub:#9aa3b5;--card:#20262f;--line:#38404f;--ok:#58b57e;--near:#e5b04a;--late:#e0605a;--acc:#6f9be3;--onacc:#10151d;--c-work:#7ea0d8;--c-queue:#e8a550;--c-appr:#a98ad6;--c-hand:#52bdb8;--c-redo:#dd7a9c;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141820;--fg:#e8ebf1;--sub:#9aa3b5;--card:#20262f;--line:#38404f;--ok:#58b57e;--near:#e5b04a;--late:#e0605a;--acc:#6f9be3;--onacc:#10151d;--c-work:#7ea0d8;--c-queue:#e8a550;--c-appr:#a98ad6;--c-hand:#52bdb8;--c-redo:#dd7a9c;color-scheme:dark}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:15px;line-height:1.5}
 #app{max-width:34rem;margin:0 auto}
 .top{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:.4rem max(16px,env(safe-area-inset-left,0px)) 0 max(16px,env(safe-area-inset-right,0px))}
@@ -320,6 +390,14 @@ main.has-sheet{padding-bottom:50vh}
 .sheet{box-sizing:border-box;position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:100%;max-width:34rem;max-height:46vh;overflow-y:auto;z-index:6;background:var(--card);border-top:2px solid var(--acc);border-radius:14px 14px 0 0;box-shadow:0 -6px 18px #0003;padding:.5rem max(16px,env(safe-area-inset-left,0px)) calc(.8rem + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-right,0px))}
 .sheet .detail{margin:0;border:0;padding:0;background:transparent}
 .close{position:sticky;top:0;float:right;min-width:40px;min-height:40px;border:1px solid var(--line);border-radius:50%;background:var(--card);font-size:1.3rem;line-height:1;cursor:pointer}
+.cause .cbar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line);margin:.3rem 0}.cbar i{display:block;height:100%}
+.cr{display:grid;grid-template-columns:1fr 3rem auto;gap:.5rem;align-items:center;font-size:.85rem;padding:.1rem 0}.cr i,.jdd i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:.35rem}.cr b{text-align:right}.cr em{font-style:normal;color:var(--sub);font-size:.78rem}
+.ll{margin-top:.4rem;display:flex;flex-direction:column;gap:.3rem}
+.lj{text-align:left;min-height:40px;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:.3rem .6rem;font-size:.82rem;cursor:pointer}.lj.open{border-color:var(--acc)}
+.jd{border:1px dashed var(--line);border-radius:8px;padding:.5rem .6rem;font-size:.82rem;display:flex;flex-direction:column;gap:.3rem}.jdd{display:flex;flex-wrap:wrap;gap:.2rem .8rem}
+.foot{margin-top:1.2rem;padding-top:.8rem;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+.foot textarea{width:100%;box-sizing:border-box;font-size:.75rem;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:8px}
+.confirm{display:inline-flex;gap:.4rem;align-items:center;font-size:.85rem}
 .hint{font-size:.8rem;color:var(--sub)}
 .result{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
 .result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}
