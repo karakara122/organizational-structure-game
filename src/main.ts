@@ -59,9 +59,20 @@ if (app) {
     return !!a && app.contains(a) && (a.tagName === "SELECT" || a.tagName === "INPUT");
   };
   /** 入力や選択の途中は、画面を描き直さない(日は進み続ける) */
+  /** 組織図の幅が画面より広いときは、縮めて収める(下限0.6。それでも広ければ横にスクロール) */
+  const fitChart = (): void => {
+    const chart = app.querySelector<HTMLElement>(".chart");
+    const inner = chart?.firstElementChild as HTMLElement | null;
+    if (!chart || !inner) return;
+    inner.style.zoom = "";
+    const need = inner.scrollWidth;
+    const have = chart.clientWidth;
+    if (need > have) inner.style.zoom = String(Math.max(0.6, have / need));
+  };
   const draw = (): void => {
     if (typing() || drag.busy) return;
     app.innerHTML = render(world, ui);
+    fitChart();
     // 90日が終わったとき、結果が見える所まで1回だけスクロールする
     const over = isScenarioOver(world);
     if (over && !resultShown) app.querySelector(".result")?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -120,6 +131,12 @@ if (app) {
       schedule();
       return true;
     }
+    if (act === "close") {
+      ui.selected = null;
+      ui.picked = [];
+      ui.mode = "none";
+      return true;
+    }
     if (act === "cancel") {
       ui.mode = "none";
       return true;
@@ -154,7 +171,7 @@ if (app) {
     }
     if (act === "create" && ui.selected !== null) {
       const input = document.getElementById("newname") as HTMLInputElement | null;
-      const name = (input?.value ?? "").trim() || "新しい部署";
+      const name = (input?.value ?? "").trim() || `新部署${world.nextDeptId}`;
       // 作ったあとも、今の部署を開いたままにする(続けて職員を移せるように)
       change(() => createDept(world, name, ui.selected!), `「${name}」を${deptName(ui.selected)}の下に作りました`);
       return true;

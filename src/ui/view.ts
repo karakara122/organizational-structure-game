@@ -7,6 +7,9 @@ import {
   TUNING,
   finalOnTimeRate,
   getStaff,
+  manageEffect,
+  manageTimeNeeded,
+  subordinateCount,
   isScenarioOver,
   onTimeRate,
   payroll,
@@ -90,10 +93,21 @@ function deptNode(w: World, d: Dept, q: Record<number, Job[]>, ui: UiState): str
   const children = w.depts.filter((c) => c.parentId === d.id);
   const kids = children.length ? `<div class="kids">${children.map((c) => deptNode(w, c, q, ui)).join("")}</div>` : "";
   const target = ui.mode !== "none" && !(ui.mode === "reparent" && ui.selected === d.id) ? "target" : "";
+  // 移す操作の途中は、各カードに「どこへ」を書く
+  const here = ui.picked.some((id) => members.some((m) => m.id === id));
+  const mv =
+    ui.mode === "move"
+      ? `<span class="mv ${here ? "src" : ""}">${here ? "移動元" : "ここへ移動"}</span>`
+      : ui.mode === "reparent"
+        ? `<span class="mv ${ui.selected === d.id ? "src" : ""}">${ui.selected === d.id ? "動かす部署" : "この下へ"}</span>`
+        : "";
+  // 部署長の管理時間が足りないとき(部下が多すぎる)だけ、印を出す。事実の表示で、提案ではない
+  const overloaded =
+    headStaff !== null && manageEffect(manageTimeNeeded(subordinateCount(w, d.id), headStaff.manage)) < 1;
   return `<div class="tn"><button class="card ${ui.selected === d.id ? "sel" : ""} ${target}" data-dept="${d.id}" data-drag="dept" data-id="${d.id}" data-label="${esc(d.name)}" aria-label="${esc(d.name)}">
-      <b>${esc(d.name)}</b>
+      ${mv}<b>${esc(d.name)}</b>
       ${head}
-      <span class="n">${members.length}人</span>
+      <span class="n">${members.length}人</span>${overloaded ? '<span class="ovl" title="部署長の管理時間が足りません">管理不足</span>' : ""}
       ${queueBar(jobs, w.day)}
       <span class="q ${late ? "lt" : ""}">待ち ${jobs.length}</span>
     </button>${kids}</div>`;
@@ -137,16 +151,16 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState)
         ? `<div class="spanel"><div><b>${pickedHere.length}人</b>を選んでいます</div>
             <div class="acts"><button class="act" data-act="move">まとめて別の部署へ移す</button><button class="act" data-act="clear">選びなおす</button></div></div>`
         : "";
-  return `<section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
+  return `<aside class="sheet" aria-label="${esc(d.name)}の職員と操作"><button class="close" data-act="close" aria-label="閉じる">×</button><section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
     <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。</div>
+    ${picked}
     <div class="names">${names || "職員はいません"}</div>
     ${members.length ? '<div class="hint">職員をタップすると選べます(続けてタップすると、複数人を選べます)。選んだ職員は、部署のカードにドラッグして移せます(1人を同じ部署のカードに落とすと部署長になります)。</div>' : ""}
-    ${picked}
     <div class="acts dacts">
-      <span class="newd"><input id="newname" value="新しい部署" maxlength="10" aria-label="新しい部署の名前"><button class="act" data-act="create">この下に部署を作る</button></span>
+      <span class="newd"><input id="newname" value="新部署${w.nextDeptId}" maxlength="10" aria-label="新しい部署の名前"><button class="act" data-act="create">この下に部署を作る</button></span>
       <button class="act" data-act="reparent">上の部署を変える</button>
       <button class="act" data-act="delete">この部署を無くす</button>
-    </div></section>`;
+    </div></section></aside>`;
 }
 
 /** 業務の流れ: 工程の順に、受け持つ部署・承認の方法・待ちの件数を見せ、その場で変えられる */
@@ -201,7 +215,7 @@ export function render(w: World, ui: UiState): string {
   const notice = ui.notice
     ? `<div class="notice ${ui.notice.ok ? "okn" : "ngn"}" role="status"><span>${esc(ui.notice.text)}</span>${undoBtn}</div>`
     : ui.canUndo
-      ? `<div class="notice">${undoBtn}</div>`
+      ? `<div class="undo-only">${undoBtn}</div>`
       : "";
   const presTag = ui.mode === "reparent" ? "button" : "span";
   return `
@@ -214,17 +228,18 @@ export function render(w: World, ui: UiState): string {
     </div>
     <progress max="${TUNING.scenarioDays}" value="${day}"></progress>
   </header>
-  <main>
+  <main class="${selected !== null ? "has-sheet" : ""}">
     ${banner}
     <div class="chart"><div class="tn rootn"><${presTag} class="president ${ui.mode === "reparent" ? "target" : ""}" data-root="1"><span class="ico">${PERSON}</span>社長</${presTag}>
       <div class="kids">${roots.map((d) => deptNode(w, d, queue, ui)).join("")}</div></div></div>
     <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
     ${notice}
-    ${selected !== null ? deptDetail(w, selected, queue, ui) : '<p class="hint">部署をタップすると、職員と操作が出ます。職員・部署・工程名は、部署のカードにドラッグして落とせます。</p>'}
+    ${selected !== null ? "" : '<p class="hint">部署をタップすると、下から職員と操作が出ます。職員・部署・工程名は、部署のカードにドラッグして落とせます。</p>'}
     ${stepSettings(w, queue)}
     <p class="status">作業中 <b>${working}</b>件 ・ 承認待ち <b>${approval}</b>件 ・ <span class="${allLate ? "lt" : ""}">期限すぎ <b>${allLate}</b>件</span></p>
     ${over ? resultView(w) : ""}
-  </main>`;
+  </main>
+  ${selected !== null ? deptDetail(w, selected, queue, ui) : ""}`;
 }
 
 export const STYLE = `
@@ -302,7 +317,14 @@ button.president{border:0;font:inherit}
 .dragging .drop{outline:3px solid var(--acc)!important;background:color-mix(in srgb,var(--acc) 15%,var(--card))}
 .ghost{position:fixed;z-index:50;pointer-events:none;transform:translate(-50%,-120%);background:var(--acc);color:var(--onacc);padding:.3rem .7rem;border-radius:14px;font-size:.85rem;box-shadow:0 4px 12px #0004;white-space:nowrap}
 .grip{display:inline-block}
+.undo-only{margin:.3rem 0}
 .undo{min-height:32px;white-space:nowrap}
+.mv{font-size:.66rem;color:var(--acc);font-weight:700}.mv.src{color:var(--sub)}
+.ovl{font-size:.64rem;color:var(--onacc);background:var(--late);border-radius:6px;padding:0 .3rem}
+main.has-sheet{padding-bottom:50vh}
+.sheet{box-sizing:border-box;position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:100%;max-width:34rem;max-height:46vh;overflow-y:auto;z-index:6;background:var(--card);border-top:2px solid var(--acc);border-radius:14px 14px 0 0;box-shadow:0 -6px 18px #0003;padding:.5rem max(16px,env(safe-area-inset-left,0px)) calc(.8rem + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-right,0px))}
+.sheet .detail{margin:0;border:0;padding:0;background:transparent}
+.close{position:sticky;top:0;float:right;min-width:40px;min-height:40px;border:1px solid var(--line);border-radius:50%;background:var(--card);font-size:1.3rem;line-height:1;cursor:pointer}
 .hint{font-size:.8rem;color:var(--sub)}
 .result{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
 .result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}

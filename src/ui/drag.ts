@@ -52,7 +52,7 @@ export function setupDrag(
     if (!handle.active) return;
     const top = EDGE_PX + 40; // 上は、固定の帯のぶん広く取る
     if (lastY < top) window.scrollBy(0, -Math.max(4, Math.ceil((top - lastY) / 3)));
-    else if (lastY > window.innerHeight - EDGE_PX) window.scrollBy(0, Math.max(4, Math.ceil((lastY - (window.innerHeight - EDGE_PX)) / 3)));
+    else if (!document.querySelector(".sheet") && lastY > window.innerHeight - EDGE_PX) window.scrollBy(0, Math.max(4, Math.ceil((lastY - (window.innerHeight - EDGE_PX)) / 3)));
     // スクロールで下にある物が変わるので、落とし先の強調も付け直す
     move(lastX, lastY);
     raf = requestAnimationFrame(autoScroll);
