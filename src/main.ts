@@ -22,7 +22,7 @@ import { STYLE, render } from "./ui/view";
 import type { Speed, UiState } from "./ui/view";
 
 /** 標準のシード(仮)。決め方は遊んでから相談する。 */
-const SEED = 1;
+const SEED = 2;
 /** 1日進める間隔(ミリ秒) */
 const INTERVAL: Record<Speed, number | null> = { pause: null, normal: 700, fast: 120 };
 
