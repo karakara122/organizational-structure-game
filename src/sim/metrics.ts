@@ -1,4 +1,4 @@
-import { JOB_KINDS, STEPS, TUNING, type Step } from "./params";
+import { FLOW_HINT, JOB_KINDS, STEPS, TUNING, type Step } from "./params";
 import { approvalReserve } from "./step";
 import type { Job, World } from "./types";
 import {
@@ -158,11 +158,17 @@ export function recentFlow(w: World, days = 7): { arrived: number; completed: nu
   return { arrived: rs.reduce((a, r) => a + r.arrived, 0), completed: rs.reduce((a, r) => a + r.completed, 0) };
 }
 
-/** 直近 days 日と、その前の days 日の、業務の発生の件数(画面の「前の7日と比べる」用) */
-export function flowCompare(w: World, days = 7): { recent: number; before: number; enough: boolean } {
+/** 直近 days 日と、その前の days 日の、業務の発生の件数(画面の「発生が増えた」の手がかり用。長さは FLOW_HINT.days) */
+export function flowCompare(w: World, days: number = FLOW_HINT.days): { recent: number; before: number; enough: boolean } {
   const n = w.records.length;
   const sum = (a: number, b: number): number => w.records.slice(a, b).reduce((x, r) => x + r.arrived, 0);
   return { recent: sum(Math.max(0, n - days), n), before: sum(Math.max(0, n - 2 * days), Math.max(0, n - days)), enough: n >= 2 * days };
+}
+
+/** 発生が増えた手がかりを出すか(直近の発生が、前の同じ長さの期間の FLOW_HINT.ratio 倍以上) */
+export function flowRising(w: World): boolean {
+  const f = flowCompare(w);
+  return f.enough && f.before > 0 && f.recent >= f.before * FLOW_HINT.ratio;
 }
 
 /** 部署の待ちの、直近 days 日での増減(記録が足りないとき・新しい部署は 0) */

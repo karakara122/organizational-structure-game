@@ -5,6 +5,8 @@ import {
   idleBot,
   loopholeBots,
   moverBot,
+  observerBot,
+  CHECK_SEEDS,
   playScenario,
   reactBot,
   solverBot,
@@ -46,6 +48,16 @@ describe("ゲームとして成り立つか(標準の設定で測る)", () => {
     const hold = measureBot(solverBot);
     expect(react.mean - hold.mean).toBeGreaterThanOrEqual(0.1);
     expect(react.stuck).toBeNull();
+  });
+
+  it("日付を知らず、画面の手がかりだけで対応しても、放置より良い(標準のシードでも検証用のシードでも)。日付を知る対応よりは少し劣る", () => {
+    for (const seeds of [STANDARD_PROFILE.seeds, CHECK_SEEDS]) {
+      const hold = measureBot(solverBot, seeds);
+      const watch = measureBot(observerBot, seeds);
+      const know = measureBot(reactBot, seeds);
+      expect(watch.mean - hold.mean).toBeGreaterThanOrEqual(0.03);
+      expect(know.mean).toBeGreaterThan(watch.mean);
+    }
   });
 
   it("繁忙期の間は、その種類の業務の発生が増える(5シードの合計)", () => {

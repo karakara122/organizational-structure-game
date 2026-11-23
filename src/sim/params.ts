@@ -83,6 +83,9 @@ export function arrivalMultiplier(kind: JobKind, day: number): number {
   return m;
 }
 
+/** 画面の「発生が増えた」の手がかり:直近 days 日の発生が、その前の days 日の ratio 倍以上のとき出す(2026-11-23 に7日・1.25倍から変更。測定結果) */
+export const FLOW_HINT = { days: 14, ratio: 1.15 } as const;
+
 export const TUNING = {
   /** 1人が1日に使える時間(人日) */
   timePerDay: 1.0,

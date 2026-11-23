@@ -15,14 +15,14 @@ export interface Measured {
   stuck: string | null;
 }
 
-/** 標準の設定(シード5つ・90日)で、ボットを測る */
-export function measureBot(bot: Bot): Measured {
+/** 標準の設定(シード5つ・90日)で、ボットを測る。seeds を渡すと、そのシードで測る(検証用は CHECK_SEEDS) */
+export function measureBot(bot: Bot, seeds: readonly number[] = STANDARD_PROFILE.seeds): Measured {
   const rates: number[] = [];
   const verdicts = { success: 0, close: 0, fail: 0 };
   let approvalShare = 0;
   let payrollNow = 0;
   let stuck: string | null = null;
-  for (const seed of STANDARD_PROFILE.seeds) {
+  for (const seed of seeds) {
     const w: World = createInitialWorld(seed);
     playScenario(w, bot);
     const r = w.records[w.records.length - 1]!.onTimeRate ?? 0;

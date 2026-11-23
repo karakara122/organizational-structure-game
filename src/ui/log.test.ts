@@ -93,25 +93,48 @@ describe("画面に見せる事実の数字", () => {
   });
 });
 
-import { flowCompare, queueChange } from "../sim";
+import { flowCompare, flowRising, queueChange } from "../sim";
+import { CHECK_SEEDS } from "../bot/bots";
 
 describe("異変に気づくための数字", () => {
-  it("14日たつまでは、前の7日と比べない/繁忙期に入ると、発生が前の7日より増える", () => {
+  it("28日たつまでは、前の14日と比べない/繁忙期に入ると、発生が前の14日より増える", () => {
     const early = createInitialWorld(2);
-    for (let i = 0; i < 10; i++) stepDay(early);
+    for (let i = 0; i < 20; i++) stepDay(early);
     expect(flowCompare(early).enough).toBe(false);
-    // 43日目:直近7日(37〜43日)がすべて繁忙期、その前の7日(30〜36日)はほぼ繁忙期の前。5シードの合計で比べる
+    expect(flowRising(early)).toBe(false);
+    // 49日目:直近14日(36〜49日)がすべて繁忙期、その前の14日(22〜35日)は繁忙期の前。5シードの合計で比べる
     let recent = 0;
     let before = 0;
     for (const seed of [1, 2, 3, 4, 5]) {
       const w = createInitialWorld(seed);
-      for (let i = 0; i < 43; i++) stepDay(w);
+      for (let i = 0; i < 49; i++) stepDay(w);
       const f = flowCompare(w);
       expect(f.enough).toBe(true);
       recent += f.recent;
       before += f.before;
     }
     expect(recent).toBeGreaterThan(before);
+  });
+  it("手がかりは、繁忙期のあいだのほうが平常時より、はっきり多く出る(雑音に埋もれない)", () => {
+    // 組織は変えない(発生は組織と無関係)。繁忙期の中(50〜65日目)と、平常時(15〜35日目と80日目以降)で、出る日の割合を比べる
+    let hit = 0;
+    let hitN = 0;
+    let calm = 0;
+    let calmN = 0;
+    for (const seed of [1, 2, 3, 4, 5, ...CHECK_SEEDS]) {
+      const w = createInitialWorld(seed);
+      for (let i = 0; i < 90; i++) {
+        stepDay(w);
+        if (w.day >= 50 && w.day <= 65) {
+          hitN++;
+          if (flowRising(w)) hit++;
+        } else if ((w.day >= 28 && w.day <= 35) || w.day >= 80) {
+          calmN++;
+          if (flowRising(w)) calm++;
+        }
+      }
+    }
+    expect(hit / hitN).toBeGreaterThan((calm / calmN) * 1.5);
   });
   it("待ちの増減は、記録が足りないと0で、たまると正になる", () => {
     const w = createInitialWorld(2);
