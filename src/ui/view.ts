@@ -9,6 +9,7 @@ import {
   canWork,
   causeSummary,
   finalOnTimeRate,
+  flowCompare,
   lateDays,
   lateJobs,
   getStaff,
@@ -20,6 +21,7 @@ import {
   isWithin,
   onTimeRate,
   payroll,
+  queueChange,
   queueDays,
   recentFlow,
   verdict,
@@ -139,13 +141,15 @@ function deptNode(w: World, d: Dept, q: Record<number, Job[]>, ui: UiState): str
   const workers = members.filter((m) => m.id !== d.headId).length;
   const idle = workers > 0 && !canWork(w, d.id);
   const owned = STEPS.some((st) => w.stepOwner[st] === d.id);
+  const qc = queueChange(w, d.id);
+  const qcBadge = qc >= 1 ? `<span class="qc ${qc >= 6 ? "hi" : qc >= 3 ? "mid" : ""}" title="直近3日の待ちの増減">+${qc}</span>` : "";
   const bw = w.staff.filter((s) => isWithin(w, s.deptId, d.id) && !w.depts.some((x) => x.headId === s.id)).length;
   return `<div class="tn"><button class="card ${ui.selected === d.id ? "sel" : ""} ${target}" data-dept="${d.id}" aria-label="${esc(d.name)}">
-      ${mv}<b>${esc(d.name)}</b>
+      ${mv}${qcBadge}<b>${esc(d.name)}</b>
       ${head}
       <span class="n">${members.length}人</span>${overloaded ? '<span class="ovl" title="部署長の管理時間が足りません">管理不足</span>' : ""}${idle ? '<span class="ovl idle" title="担当する工程の下にいないため、職員は作業していません">作業なし</span>' : ""}
       ${queueBar(jobs, w.day, bw)}
-      <span class="q ${late ? "lt" : ""}">待ち ${jobs.length}${owned && jobs.length ? ` ・${daysText(w, jobs, d.id)}` : ""}</span>
+      <span class="q ${late ? "lt" : ""}"><span>待ち ${jobs.length}</span>${owned && jobs.length ? ` <span class="qd">${daysText(w, jobs, d.id)}</span>` : ""}</span>
     </button>${kids}</div>`;
 }
 
@@ -211,6 +215,7 @@ function deptDetail(w: World, id: number, q: Record<number, Job[]>, ui: UiState)
   return `<aside class="sheet" aria-label="${esc(d.name)}の職員と操作"><button class="close" data-act="close" aria-label="閉じる">×</button><section class="detail"><b>${esc(d.name)}</b> ${steps.length ? `・ 受け持ち ${steps.join("・")}` : "・ 受け持ちの工程なし"}
     <div>待ち ${jobs.length}件(${byKind})。期限をすぎたもの ${late}件。${jobs.length ? (queueDays(w, jobs, d.id) === Infinity ? "作業する職員がいません。" : `片づけるのに約${daysText(w, jobs, d.id)}(残りの作業量 ÷ 作業する職員の人数)。`) : ""}</div>
     ${facts(w, d)}
+    ${STEPS.filter((st) => w.stepOwner[st] === d.id).map((st) => stepRow(w, q, st)).join("")}
     ${picked}
     <div class="names">${names || "職員はいません"}</div>
     ${members.length ? '<div class="hint">職員をタップすると選べます(続けてタップすると、複数人を選べます)。選んだあと、移す先の部署のカードをタップすると移ります。</div>' : ""}
@@ -241,9 +246,9 @@ function trend(w: World): string {
   return `<div class="trendh">期限内完了率の推移(点線は目標80%)</div><svg class="trend" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="期限内完了率の推移(点線は目標80%)"><line x1="0" x2="${W}" y1="${y(0.8)}" y2="${y(0.8)}" class="goal"/><polyline points="${line}" class="ln"/></svg>`;
 }
 
-/** 業務の流れ: 工程の順に、受け持つ部署・承認の方法・待ちの件数を見せ、その場で変えられる */
-function stepSettings(w: World, q: Record<number, Job[]>): string {
-  const rows = STEPS.map((st) => {
+/** 工程1つぶんの行: 受け持つ部署・承認の方法・待ちの件数を見せ、その場で変えられる */
+function stepRow(w: World, q: Record<number, Job[]>, st: Step): string {
+  {
     const n = (q[w.stepOwner[st]] ?? []).filter((j) => stepOf(j) === st).length;
     const deptOpts = w.depts
       .map((d) => `<option value="${d.id}" ${d.id === w.stepOwner[st] ? "selected" : ""}>${esc(d.name)}</option>`)
@@ -255,7 +260,12 @@ function stepSettings(w: World, q: Record<number, Job[]>): string {
       <label>担当<select data-owner="${st}">${deptOpts}</select></label>
       <label>承認<select data-appr="${st}">${apprOpts}</select></label>
       <em class="${n >= 10 ? "jam" : ""}">待ち ${n}件</em>${approvalInfo(w, st)}</div>`;
-  });
+  }
+}
+
+/** 業務の流れ: 工程の順に、受け持つ部署・承認の方法・待ちの件数を見せ、その場で変えられる */
+function stepSettings(w: World, q: Record<number, Job[]>): string {
+  const rows = STEPS.map((st) => stepRow(w, q, st));
   return `<section class="steps"><h2 class="sec">業務の流れ(見積 → 制作 → 検査)</h2>${rows.join("")}</section>`;
 }
 
@@ -353,6 +363,11 @@ export function render(w: World, ui: UiState): string {
     : ui.canUndo
       ? `<div class="undo-only">${undoBtn}</div>`
       : "";
+  const fc = flowCompare(w);
+  const surge =
+    fc.enough && fc.before > 0 && fc.recent >= fc.before * 1.25
+      ? `<div class="flowup" role="status">直近7日の発生 ${fc.recent}件(前の7日 ${fc.before}件) ↑</div>`
+      : "";
   const presTag = ui.mode === "reparent" ? "button" : "span";
   return `
   <header class="top">
@@ -366,6 +381,7 @@ export function render(w: World, ui: UiState): string {
   </header>
   <main class="${selected !== null ? "has-sheet" : ""}">
     ${banner}
+    ${surge}
     <div class="chart"><div class="tn rootn"><${presTag} class="president ${ui.mode === "reparent" ? "target" : ""}" data-root="1"><span class="ico">${PERSON}</span>社長</${presTag}>
       <div class="kids">${roots.map((d) => deptNode(w, d, queue, ui)).join("")}</div></div></div>
     <div class="legend"><i class="ok"></i>余裕あり<i class="near"></i>期限が近い<i class="late"></i>期限をすぎた(待ちの棒)</div>
@@ -430,6 +446,7 @@ main{padding:.6rem max(16px,env(safe-area-inset-left,0px)) 2rem max(16px,env(saf
 .kids>.tn:only-child{padding-top:14px}
 .card{display:flex;flex-direction:column;align-items:center;gap:.2rem;width:6.6rem;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:.4rem .3rem;cursor:pointer;min-height:44px;font-size:.78rem}
 .card b{font-size:.9rem}.card.sel{border-color:var(--acc)}
+.card{position:relative}.card .qc{position:absolute;top:2px;right:4px;font-size:.7rem;color:var(--sub);font-variant-numeric:tabular-nums}.card .qc.mid{color:#fff;background:var(--near);border-radius:6px;padding:0 .3rem;font-weight:700}.card .qc.hi{color:#fff;background:var(--late);border-radius:6px;padding:0 .3rem;font-weight:700}.card .q>span{white-space:nowrap}.card .qd{color:var(--sub);font-size:.72rem}.flowup{margin:.3rem 0;padding:.35rem .6rem;border:1px solid var(--late);border-radius:8px;font-size:.85rem;font-weight:700;color:var(--late);background:var(--card)}
 .card .n{color:var(--sub);font-size:.72rem}.card .q{font-size:.78rem;font-variant-numeric:tabular-nums}.lt{color:var(--late);font-weight:700}
 .hd{display:inline-flex;align-items:center;gap:.2rem;font-size:.78rem;font-weight:700}.hd.vac{color:var(--late)}.hd.vac .ico{color:var(--late)}
 .bar2{display:flex;height:8px;width:100%;border-radius:4px;overflow:hidden;background:var(--line)}.bar2 i{display:block;height:100%}

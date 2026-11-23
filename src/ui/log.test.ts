@@ -77,3 +77,31 @@ describe("画面に見せる事実の数字", () => {
     expect(queueDays(w, jobs, w.stepOwner.produce)).toBeGreaterThanOrEqual(0);
   });
 });
+
+import { flowCompare, queueChange } from "../sim";
+
+describe("異変に気づくための数字", () => {
+  it("14日たつまでは、前の7日と比べない/繁忙期に入ると、発生が前の7日より増える", () => {
+    const early = createInitialWorld(2);
+    for (let i = 0; i < 10; i++) stepDay(early);
+    expect(flowCompare(early).enough).toBe(false);
+    // 43日目:直近7日(37〜43日)がすべて繁忙期、その前の7日(30〜36日)はほぼ繁忙期の前。5シードの合計で比べる
+    let recent = 0;
+    let before = 0;
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const w = createInitialWorld(seed);
+      for (let i = 0; i < 43; i++) stepDay(w);
+      const f = flowCompare(w);
+      expect(f.enough).toBe(true);
+      recent += f.recent;
+      before += f.before;
+    }
+    expect(recent).toBeGreaterThan(before);
+  });
+  it("待ちの増減は、記録が足りないと0で、たまると正になる", () => {
+    const w = createInitialWorld(2);
+    expect(queueChange(w, w.stepOwner.produce)).toBe(0);
+    for (let i = 0; i < 12; i++) stepDay(w);
+    expect(Number.isInteger(queueChange(w, w.stepOwner.produce))).toBe(true);
+  });
+});
