@@ -1,4 +1,4 @@
-import { JOB_KIND_LIST, JOB_KINDS, TUNING, type RouteStep, type Step } from "./params";
+import { arrivalMultiplier, JOB_KIND_LIST, JOB_KINDS, TUNING, type RouteStep, type Step } from "./params";
 import { poisson, rand01, TAG } from "./rng";
 import type { DayRecord, Job, World } from "./types";
 import {
@@ -124,7 +124,9 @@ export function stepDay(w: World): DayRecord {
   JOB_KIND_LIST.forEach((kind, ki) => {
     const spec = JOB_KINDS[kind];
     const n =
-      w.arrivalScale > 0 ? poisson(spec.ratePerDay * w.arrivalScale, w.seed, TAG.arrival, day, ki) : 0;
+      w.arrivalScale > 0
+        ? poisson(spec.ratePerDay * w.arrivalScale * arrivalMultiplier(kind, day), w.seed, TAG.arrival, day, ki)
+        : 0;
     for (let i = 0; i < n; i++) {
       w.jobs.push({
         id: w.nextJobId++,

@@ -8,6 +8,7 @@ import {
   setHead,
   stepDay,
   STEPS,
+  SURGES,
   TUNING,
   type ApprovalChoice,
   type World,
@@ -90,6 +91,38 @@ export const solverBot: Bot = {
     splitProduction(w);
   },
 };
+
+/**
+ * 「見本の直し+繁忙期に対応」:見本の直し方のあと、繁忙期の始まりに、営業部の制作が得意な職員2人を制作部へ動かし、
+ * 繁忙期が終わったら営業部へ戻す。繁忙期は params.ts の SURGES から読む(ボットは、繁忙期を知っている前提)。
+ */
+export const reactBot: Bot = (() => {
+  const moved: number[] = [];
+  return {
+    name: "見本の直し+繁忙期に対応",
+    act(w) {
+      const surge = SURGES[0];
+      if (w.day === 0) {
+        setApprovals(w, "none", "above", "head");
+        splitProduction(w);
+        moved.length = 0;
+      }
+      if (!surge) return;
+      const sales = w.stepOwner.estimate;
+      if (w.day === surge.fromDay - 1) {
+        const pick = w.staff
+          .filter((s) => s.deptId === sales && !w.depts.some((d) => d.headId === s.id))
+          .sort((a, b) => b.skills.produce - a.skills.produce)
+          .slice(0, 2);
+        for (const s of pick) {
+          moved.push(s.id);
+          assignStaff(w, s.id, w.stepOwner.produce);
+        }
+      }
+      if (w.day === surge.toDay) for (const id of moved) assignStaff(w, id, sales);
+    },
+  };
+})();
 
 /** 抜け道を探す:極端な形を、最初の1回だけ試す。各項目は、1つの操作だけを変えたもの */
 export interface LoopholePlan {
