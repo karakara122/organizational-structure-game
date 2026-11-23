@@ -14,6 +14,7 @@ import {
   lateJobs,
   getStaff,
   manageEffect,
+  approvalSqueeze,
   manageLoad,
   manageTimeNeeded,
   subordinateCount,
@@ -178,6 +179,12 @@ function facts(w: World, d: Dept): string {
   } else {
     out.push('<div class="fact warn">部署長が空席です。部署の職員の能率が下がっています</div>');
   }
+  const sq = approvalSqueeze(w, d.id);
+  if (sq?.squeezed) {
+    out.push(
+      `<div class="fact warn">承認待ち ${sq.waiting}件のために、部署長は先に約${sq.reserve.toFixed(1)}日分を承認に使っています。管理に使える時間が減り、部署の職員の能率が下がっています</div>`,
+    );
+  }
   const workers = w.staff.filter((s) => s.deptId === d.id && s.id !== d.headId).length;
   if (workers > 0 && !canWork(w, d.id)) {
     out.push(
@@ -231,7 +238,7 @@ function approvalInfo(w: World, st: Step): string {
   const a = approvalLoad(w, st);
   if (!a) return "";
   const jam = a.waiting > a.perDay * 2;
-  return `<div class="afact ${jam ? "warn" : ""}">承認待ち ${a.waiting}件 ・ 承認する${esc(a.who)}が1日に処理できる目安 ${a.perDay}件</div>`;
+  return `<div class="afact ${jam ? "warn" : ""}">承認待ち ${a.waiting}件 ・ 承認する${esc(a.who)}が管理を保ったまま1日に処理できる目安 ${a.perDay}件</div>`;
 }
 
 /** 期限内完了率の推移(小さなグラフ) */

@@ -10,6 +10,7 @@ import {
   solverBot,
   STANDARD_PROFILE,
 } from "./bots";
+import { createDept, setStepOwner } from "../sim";
 import { measureBot, startRate } from "./measure";
 
 describe("標準の設定", () => {
@@ -108,10 +109,26 @@ describe("ゲームとして成り立つか(標準の設定で測る)", () => {
     expect(verdict(w, w.payrollCap + 1)).toBe("fail");
   });
 
-  it("「止まった」を検出して理由を返す(承認を全部部署長にすると、制作部が承認できず止まる)", () => {
-    const stuckBot = loopholeBots.find((b) => b.name.includes("全部、部署長"))!;
+  it("「止まった」を検出して理由を返す(制作の担当を、職員のいない部署にすると止まる)", () => {
+    const stuckBot = {
+      name: "制作の担当を空の部署にする",
+      act(w: ReturnType<typeof createInitialWorld>) {
+        if (w.day !== 0) return;
+        const made = createDept(w, "空の部署", null);
+        if (!made.ok || made.id === undefined) throw new Error("部署を作れない");
+        setStepOwner(w, "produce", made.id);
+      },
+    };
     const w = createInitialWorld(1);
     playScenario(w, stuckBot);
     expect(detectStuck(w)?.reason).toContain("完了が15日続けて0");
+  });
+
+  it("承認を全部、部署長にしても、承認は先に時間を取るので止まらず、見本の直し方よりは悪い", () => {
+    const all = loopholeBots.find((b) => b.name.includes("全部、部署長"))!;
+    const w = createInitialWorld(1);
+    playScenario(w, all);
+    expect(detectStuck(w)).toBeNull();
+    expect(measureBot(all).mean).toBeLessThan(measureBot(solverBot).mean);
   });
 });

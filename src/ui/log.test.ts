@@ -39,7 +39,7 @@ describe("遅れの原因とプレイ記録", () => {
   });
 });
 
-import { approvalLoad, canWork, createDept, manageLoad, queueDays, recentFlow, assignStaff, stepDay } from "../sim";
+import { approvalLoad, approvalSqueeze, canWork, createDept, manageLoad, queueDays, recentFlow, assignStaff, stepDay } from "../sim";
 
 describe("画面に見せる事実の数字", () => {
   it("制作部は、部下13人に対して管理の目安は9人", () => {
@@ -67,6 +67,21 @@ describe("画面に見せる事実の数字", () => {
     expect(head.perDay).toBeLessThan(pres.perDay);
     w.approval.produce = "none";
     expect(approvalLoad(w, "produce")).toBeNull();
+  });
+  it("承認待ちが増えると、管理に使える時間が減ったことが分かる(承認を先に取る)", () => {
+    const w = createInitialWorld(1);
+    const sub = createDept(w, "下", w.stepOwner.produce);
+    if (!sub.ok) throw new Error("部署が作れません");
+    // 制作部の部下を管理の目安ぎりぎり(9人)にしてから、承認待ちをためる
+    const head = w.depts.find((d) => d.id === w.stepOwner.produce)!.headId!;
+    const members = w.staff.filter((x) => x.deptId === w.stepOwner.produce && x.id !== head);
+    for (const m of members.slice(0, members.length - 9)) assignStaff(w, m.id, w.stepOwner.estimate);
+    w.approval.produce = "head";
+    expect(approvalSqueeze(w, w.stepOwner.produce)!.squeezed).toBe(false);
+    for (let i = 0; i < 20; i++) stepDay(w);
+    const sq = approvalSqueeze(w, w.stepOwner.produce)!;
+    expect(sq.waiting).toBeGreaterThan(0);
+    expect(sq.reserve).toBeGreaterThan(0);
   });
   it("直近7日の発生・完了と、待ちを片づける日数が出る", () => {
     const w = createInitialWorld(1);
