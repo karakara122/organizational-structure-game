@@ -9,6 +9,7 @@ import {
   canWork,
   causeSummary,
   finalOnTimeRate,
+  baselineFor,
   FLOW_HINT,
   flowCompare,
   flowRising,
@@ -252,7 +253,14 @@ function trend(w: World): string {
   const x = (d: number): number => (d / TUNING.scenarioDays) * W;
   const y = (r: number): number => H - 2 - r * (H - 4);
   const line = pts.map((r) => `${x(r.day).toFixed(1)},${y(r.onTimeRate!).toFixed(1)}`).join(" ");
-  return `<div class="trendh">期限内完了率の推移(点線は目標80%)</div><svg class="trend" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="期限内完了率の推移(点線は目標80%)"><line x1="0" x2="${W}" y1="${y(0.8)}" y2="${y(0.8)}" class="goal"/><polyline points="${line}" class="ln"/></svg>`;
+  // 灰色の線: 何もしなかった場合(同じシードで最初の組織のまま)。今の日までだけ描く
+  const base = baselineFor(w.seed);
+  const bpts = w.records
+    .map((r, i) => ({ day: r.day, rate: base.rates[i] ?? null }))
+    .filter((p) => p.rate !== null);
+  const bline = bpts.map((p) => `${x(p.day).toFixed(1)},${y(p.rate!).toFixed(1)}`).join(" ");
+  const bsvg = bpts.length >= 2 ? `<polyline points="${bline}" class="bl"/>` : "";
+  return `<div class="trendh">期限内完了率の推移(点線は目標80%・灰色は何もしなかった場合)</div><svg class="trend" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="期限内完了率の推移(点線は目標80%、灰色は何もしなかった場合)"><line x1="0" x2="${W}" y1="${y(0.8)}" y2="${y(0.8)}" class="goal"/>${bsvg}<polyline points="${line}" class="ln"/></svg>`;
 }
 
 /** 工程1つぶんの行: 受け持つ部署・承認の方法・待ちの件数を見せ、その場で変えられる */
@@ -336,6 +344,17 @@ function footer(ui: UiState): string {
   return `<footer class="foot"><button class="act" data-act="copylog">記録をコピー</button>${reset}${text}</footer>`;
 }
 
+/** 自分の組織と、「何もしなかった場合」(同じシードで最初の組織のまま)の比較 */
+function compareView(w: World): string {
+  const mine = finalOnTimeRate(w);
+  const base = baselineFor(w.seed).final;
+  if (mine === null || base === null) return "";
+  const diff = Math.round((mine - base) * 100);
+  const sign = diff > 0 ? `+${diff}` : `${diff}`;
+  const word = diff > 0 ? "あなたの組織のほうが良くなりました" : diff < 0 ? "何もしないほうが良い結果でした" : "同じ結果でした";
+  return `<p class="cmp">何もしなかった場合(同じ注文・最初の組織のまま): <b>${pct(base)}</b> → あなたの組織 <b>${pct(mine)}</b>(${sign}ポイント。${word})</p>`;
+}
+
 function resultView(w: World): string {
   const v = verdict(w, payroll(w));
   const label = { success: "成功", close: "惜しい", fail: "失敗" }[v];
@@ -343,6 +362,7 @@ function resultView(w: World): string {
   return `<section class="result ${v}"><h2>${label}</h2>
     <p>最後の30日間の期限内完了率 <b>${pct(finalOnTimeRate(w))}</b>(目標 80%)</p>
     <p>人件費 ${payroll(w).toFixed(1)} / 上限 ${w.payrollCap.toFixed(1)}${over ? "(上限を超えています)" : ""}</p>
+    ${compareView(w)}
     <button class="primary" data-act="restart">もう一度はじめる</button></section>`;
 }
 
@@ -484,7 +504,7 @@ button.president{border:0;font:inherit}
 .ovl.idle{background:var(--sub)}
 .srow .afact{grid-column:2/4;font-size:.72rem;color:var(--sub)}.afact.warn{color:var(--late);font-weight:700}
 .fact{font-size:.8rem;color:var(--sub);margin:.15rem 0}.fact.warn{color:var(--late);font-weight:700}
-.trendh{font-size:.75rem;color:var(--sub);margin-top:.5rem}.trend{display:block;width:100%;height:44px;margin:.4rem 0 0}.trend .ln{fill:none;stroke:var(--fg);stroke-width:1.6;vector-effect:non-scaling-stroke}.trend .goal{stroke:var(--sub);stroke-dasharray:4 3;stroke-width:1;vector-effect:non-scaling-stroke}
+.trendh{font-size:.75rem;color:var(--sub);margin-top:.5rem}.trend{display:block;width:100%;height:44px;margin:.4rem 0 0}.trend .ln{fill:none;stroke:var(--fg);stroke-width:1.6;vector-effect:non-scaling-stroke}.trend .bl{fill:none;stroke:var(--sub);stroke-width:1.4;opacity:.7;vector-effect:non-scaling-stroke}.trend .goal{stroke:var(--sub);stroke-dasharray:4 3;stroke-width:1;vector-effect:non-scaling-stroke}
 main.has-sheet{padding-bottom:50vh}
 .sheet{box-sizing:border-box;position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:100%;max-width:34rem;max-height:46vh;overflow-y:auto;z-index:6;background:var(--card);border-top:2px solid var(--acc);border-radius:14px 14px 0 0;box-shadow:0 -6px 18px #0003;padding:.5rem max(16px,env(safe-area-inset-left,0px)) calc(.8rem + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-right,0px))}
 .sheet .detail{margin:0;border:0;padding:0;background:transparent}
@@ -499,6 +519,6 @@ main.has-sheet{padding-bottom:50vh}
 .confirm{display:inline-flex;gap:.4rem;align-items:center;font-size:.85rem}
 .hint{font-size:.8rem;color:var(--sub)}
 .result{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;background:var(--card);border:2px solid var(--line)}
-.result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}
+.result .cmp{font-size:.9rem}.result h2{margin:0 0 .4rem}.result.success{border-color:var(--ok)}.result.close{border-color:var(--near)}.result.fail{border-color:var(--late)}
 .primary{width:100%;min-height:48px;border:0;border-radius:8px;background:var(--acc);color:var(--onacc);font-weight:700;cursor:pointer}
 `;

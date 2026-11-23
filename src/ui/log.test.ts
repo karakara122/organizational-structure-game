@@ -143,3 +143,39 @@ describe("異変に気づくための数字", () => {
     expect(Number.isInteger(queueChange(w, w.stepOwner.produce))).toBe(true);
   });
 });
+
+import { baselineFor, TUNING } from "../sim";
+import { solverBot, idleBot, playScenario } from "../bot/bots";
+import { render, type UiState } from "./view";
+
+describe("何もしなかった場合との比較", () => {
+  const ui: UiState = { speed: "pause", selected: null, picked: [], canUndo: false, mode: "none", showLate: false, openJob: null, confirmReset: false, copyText: null, notice: null };
+  it("基準は、同じシードで何もしないボットを回した記録と同じ", () => {
+    for (const seed of [1, 2]) {
+      const w = createInitialWorld(seed);
+      playScenario(w, idleBot);
+      const b = baselineFor(seed);
+      expect(b.rates).toEqual(w.records.map((r) => r.onTimeRate));
+      expect(b.final).toBe(w.records[TUNING.scenarioDays - 1]!.onTimeRate);
+    }
+  });
+  it("自分の組織を変えても、基準は変わらない(業務の発生が同じなので公平)", () => {
+    const before = baselineFor(1).final;
+    const w = createInitialWorld(1);
+    playScenario(w, solverBot);
+    expect(baselineFor(1).final).toBe(before);
+    // 見本の直しは、何もしないより良い
+    expect(w.records[TUNING.scenarioDays - 1]!.onTimeRate!).toBeGreaterThan(before!);
+  });
+  it("90日が終わると、結果に「何もしなかった場合」との差が出る。途中は灰色の線だけ", () => {
+    const w = createInitialWorld(1);
+    playScenario(w, solverBot, 40);
+    const mid = render(w, ui);
+    expect(mid).toContain('class="bl"');
+    expect(mid).not.toContain("何もしなかった場合(同じ注文");
+    playScenario(w, solverBot, 50);
+    const end = render(w, ui);
+    expect(end).toContain("何もしなかった場合(同じ注文・最初の組織のまま)");
+    expect(end).toMatch(/\+\d+ポイント/);
+  });
+});
