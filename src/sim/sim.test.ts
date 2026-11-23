@@ -222,15 +222,32 @@ describe("1日の計算", () => {
     expect(job.availableOn).toBe(2); // 承認を通ったので、次の日から
   });
 
-  it("部署長の管理が手一杯だと、承認が間に合わず承認待ちが続く", () => {
-    // 部下12人 → 管理に0.96人日、承認に使えるのは0.04人日(0.1に満たない)
+  it("部署長の管理が手一杯だと承認が1日遅れ、翌朝からは承認が先に時間を取って、管理の効きが下がる", () => {
+    // 部下12人 → 管理に0.96人日、承認に使えるのは0.04人日(0.05に満たない)
     const w = tinyWorld({ staff: 12, seed: seedWithoutMistakes(1, 3, 2) });
     w.approval.produce = "head";
     const job = addJob(w, { stepIdx: 1, remaining: 0.5 });
     stepDay(w);
+    expect(job.phase).toBe("approval"); // 1日目:残り0.04人日では承認できず、承認待ち
     stepDay(w);
-    expect(job.phase).toBe("approval");
-    expect(job.days.approval).toBe(2);
+    expect(job.phase).toBe("queued"); // 2日目:朝に承認待ちが1件あるので、先に0.05人日を承認に取る
+    expect(job.days.approval).toBe(1);
+    expect(job.stepIdx).toBe(2);
+  });
+
+  it("承認待ちが増えると、部署長は管理が足りなくなり、その部署の職員の能率が下がる(承認を増やすと管理が落ちる)", () => {
+    const w = tinyWorld({ staff: 12 });
+    w.approval.produce = "head";
+    const probe = () => {
+      const j = addJob(w, { stepIdx: 1, remaining: 100 });
+      const before = j.remaining;
+      stepDay(w);
+      return before - j.remaining;
+    };
+    const quiet = probe(); // 承認待ちなし:管理に0.96人日、ほぼ足りている
+    for (let i = 0; i < 12; i++) addJob(w, { stepIdx: 1, phase: "approval", remaining: 0 });
+    const busy = probe(); // 承認待ち12件:朝に0.6人日を承認に取るので、管理の効きが下がる
+    expect(busy).toBeLessThan(quiet);
   });
 
   it("承認でミスが見つかると、その工程を作業量の半分でやり直す", () => {

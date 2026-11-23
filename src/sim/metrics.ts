@@ -1,4 +1,5 @@
 import { JOB_KINDS, STEPS, TUNING, type Step } from "./params";
+import { approvalReserve } from "./step";
 import type { Job, World } from "./types";
 import {
   getDept,
@@ -92,6 +93,23 @@ export function manageLoad(w: World, deptId: number): { subordinates: number; ca
   const d = getDept(w, deptId);
   if (d.headId === null) return null;
   return { subordinates: subordinateCount(w, deptId), capacity: manageCapacity(getStaff(w, d.headId).manage) };
+}
+
+/**
+ * 部署長が、承認に先に使う時間と、管理に必要な時間。承認のせいで管理に使える時間が足りなくなっているとき squeezed が true。
+ * 部署長が空席なら null
+ */
+export function approvalSqueeze(
+  w: World,
+  deptId: number,
+): { waiting: number; reserve: number; need: number; squeezed: boolean } | null {
+  const d = getDept(w, deptId);
+  if (d.headId === null) return null;
+  const need = manageTimeNeeded(subordinateCount(w, deptId), getStaff(w, d.headId).manage);
+  const reserve = approvalReserve(w, String(d.headId));
+  // 管理だけで手一杯のとき(need > 1)は、「管理の目安超え」の表示があるので、ここでは数えない
+  const squeezed = need <= TUNING.timePerDay && reserve > TUNING.timePerDay - need + 1e-9;
+  return { waiting: Math.round(reserve / TUNING.approvalTime), reserve, need, squeezed };
 }
 
 /** その部署の職員が、作業できる工程があるか(工程の担当部署の下にいるか) */

@@ -96,6 +96,12 @@ function pickJob(w: World, day: number, deptId: number): Job | null {
   return best;
 }
 
+/** 承認者(部署長の職員番号、社長は "p")が、朝の承認待ちのために先に取る時間(最大1日) */
+export function approvalReserve(w: World, key: string): number {
+  const n = w.jobs.filter((j) => j.phase === "approval" && approverKey(resolveApprover(w, j)) === key).length;
+  return Math.min(TUNING.timePerDay, n * TUNING.approvalTime);
+}
+
 function resolveApprover(w: World, job: Job): Approver {
   const step = currentStep(job);
   const owner = getDept(w, w.stepOwner[step]);
@@ -153,9 +159,17 @@ export function stepDay(w: World): DayRecord {
     }
   });
 
-  // 2. 部署長と社長が、時間を「管理」に使う。残りが「承認」に使える時間
+  // 2. 部署長と社長が、その日の時間を「承認」と「管理」に使う。
+  //    朝の時点の承認待ちの件数ぶん(最大1日)を先に承認に取り、管理はその残りの時間でする。
+  //    残りが管理に必要な時間より少ないと、管理の効きが下がる(承認を増やすと管理が落ちる)
   const effect = new Map<number, number>();
   const leftover = new Map<string, number>();
+  const split = (key: string, need: number): { eff: number; left: number } => {
+    const reserve = approvalReserve(w, key);
+    const avail = TUNING.timePerDay - reserve;
+    const eff = avail <= EPS ? TUNING.manageEffectFloor : manageEffect((need * TUNING.timePerDay) / avail);
+    return { eff, left: Math.max(TUNING.timePerDay - need, reserve) };
+  };
   for (const d of w.depts) {
     if (d.headId === null) {
       effect.set(d.id, TUNING.manageEffectFloor);
@@ -163,12 +177,14 @@ export function stepDay(w: World): DayRecord {
     }
     const head = getStaff(w, d.headId);
     const need = manageTimeNeeded(subordinateCount(w, d.id), head.manage);
-    effect.set(d.id, manageEffect(need));
-    leftover.set(String(head.id), Math.max(0, TUNING.timePerDay - need));
+    const r = split(String(head.id), need);
+    effect.set(d.id, r.eff);
+    leftover.set(String(head.id), r.left);
   }
   {
     const need = manageTimeNeeded(presidentSubordinateCount(w), w.presidentManage);
-    leftover.set("p", Math.max(0, TUNING.timePerDay - need));
+    // 社長の管理の効きは、職員の能率には使われない(承認の時間だけを残す)
+    leftover.set("p", split("p", need).left);
   }
 
   // 3. 職員が、所属部署の待ちから期限が近い順に業務を取り、作業を進める
