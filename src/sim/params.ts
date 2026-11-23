@@ -64,6 +64,25 @@ export const JOB_KINDS: Record<JobKind, JobKindSpec> = {
 
 export const JOB_KIND_LIST = ["small", "large", "rush"] as const;
 
+/** 繁忙期(仕様書 4章)。この期間だけ、その種類の発生(件/日)に倍率を掛ける。画面では予告しない */
+export interface Surge {
+  kind: JobKind;
+  /** 発生の日(日目)が、この日から この日まで(両端を含む)のあいだ、倍率を掛ける */
+  fromDay: number;
+  toDay: number;
+  multiplier: number;
+}
+
+/** 2026-11-23:小口注文が36〜65日目に1.3倍。放置だと成功と失敗の境目になり、途中で対応すると約10ポイント良くなる値(docs/測定結果.md) */
+export const SURGES: Surge[] = [{ kind: "small", fromDay: 36, toDay: 65, multiplier: 1.3 }];
+
+/** 発生の日 day に、kind の発生(件/日)へ掛ける倍率 */
+export function arrivalMultiplier(kind: JobKind, day: number): number {
+  let m = 1;
+  for (const sg of SURGES) if (sg.kind === kind && day >= sg.fromDay && day <= sg.toDay) m *= sg.multiplier;
+  return m;
+}
+
 export const TUNING = {
   /** 1人が1日に使える時間(人日) */
   timePerDay: 1.0,

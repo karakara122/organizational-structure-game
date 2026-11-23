@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createInitialWorld, onTimeRate, payroll, TUNING, verdict } from "../sim";
+import { arrivalMultiplier, createInitialWorld, onTimeRate, payroll, stepDay, SURGES, TUNING, verdict } from "../sim";
 import {
   detectStuck,
   idleBot,
   loopholeBots,
   moverBot,
   playScenario,
+  reactBot,
   solverBot,
   STANDARD_PROFILE,
 } from "./bots";
@@ -32,10 +33,40 @@ describe("ゲームとして成り立つか(標準の設定で測る)", () => {
     expect(m.verdicts.success).toBe(0);
   });
 
-  it("うまく直せば、成功する(見本の直し方は、全部のシードで成功)", () => {
+  it("見本の直し方で放置すると、繁忙期のせいで成功と失敗の境目になる(成功は5シード中2〜3)", () => {
     const m = measureBot(solverBot);
-    expect(m.verdicts.success).toBe(STANDARD_PROFILE.seeds.length);
+    expect(m.verdicts.success).toBeGreaterThanOrEqual(2);
+    expect(m.verdicts.success).toBeLessThanOrEqual(3);
     expect(m.stuck).toBeNull();
+  });
+
+  it("繁忙期に途中で対応すると、放置より10ポイント以上良くなる(途中の操作に意味がある)", () => {
+    const react = measureBot(reactBot);
+    const hold = measureBot(solverBot);
+    expect(react.mean - hold.mean).toBeGreaterThanOrEqual(0.1);
+    expect(react.stuck).toBeNull();
+  });
+
+  it("繁忙期の間は、その種類の業務の発生が増える(5シードの合計)", () => {
+    const sg = SURGES[0]!;
+    expect(arrivalMultiplier(sg.kind, sg.fromDay - 1)).toBe(1);
+    expect(arrivalMultiplier(sg.kind, sg.fromDay)).toBe(sg.multiplier);
+    expect(arrivalMultiplier(sg.kind, sg.toDay)).toBe(sg.multiplier);
+    expect(arrivalMultiplier(sg.kind, sg.toDay + 1)).toBe(1);
+    const count = (from: number, to: number): number => {
+      let n = 0;
+      for (const seed of STANDARD_PROFILE.seeds) {
+        const w = createInitialWorld(seed);
+        for (let d = 1; d <= to; d++) {
+          const r = stepDay(w);
+          if (d >= from) n += r.arrived;
+        }
+      }
+      return n;
+    };
+    const len = sg.toDay - sg.fromDay + 1;
+    // 繁忙期のある期間の発生は、すぐ前の同じ長さの期間より多い
+    expect(count(sg.fromDay, sg.toDay)).toBeGreaterThan(count(sg.fromDay - len, sg.fromDay - 1));
   });
 
   it("1つの操作だけで全部解決する抜け道が無い(極端な形はどれも、平均80%未満)", () => {
