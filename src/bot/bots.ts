@@ -3,6 +3,8 @@
 import {
   assignStaff,
   createDept,
+  flowCompare,
+  flowRising,
   isWithin,
   setApproval,
   setHead,
@@ -27,6 +29,12 @@ export const STANDARD_PROFILE = {
   /** 「人を動かす」ボットが行動する間隔(日) */
   moverEveryDays: 5,
 } as const;
+
+/**
+ * 検証用のシード(2026-11-23)。数字は標準のシード5つで調整し、ここでは確かめるだけにする(5つに合わせ込んでいないかを見る)。
+ * 標準のシードより難しく、見本の直し方の放置は成功が2/20ほど。
+ */
+export const CHECK_SEEDS: readonly number[] = Array.from({ length: 20 }, (_, i) => 101 + i);
 
 export function playScenario(w: World, bot: Bot, days: number = STANDARD_PROFILE.days): void {
   for (let i = 0; i < days; i++) {
@@ -120,6 +128,46 @@ export const reactBot: Bot = (() => {
         }
       }
       if (w.day === surge.toDay) for (const id of moved) assignStaff(w, id, sales);
+    },
+  };
+})();
+
+/**
+ * 見本の直しのあと、**繁忙期の日付を知らずに**、画面に出る手がかり(直近の発生が増えた表示)だけで動く。
+ * 表示が出たら営業部の制作が得意な2人を制作部へ動かし、10日たって発生が前の期間以下に戻ったら営業部へ戻す。
+ * 「日付を知って対応」との差が、気づく難しさ(気づくのが遅れた分)を表す。
+ */
+export const observerBot: Bot = (() => {
+  const moved: number[] = [];
+  let movedDay = -1;
+  return {
+    name: "見本の直し+画面の手がかりだけで対応",
+    act(w) {
+      if (w.day === 0) {
+        setApprovals(w, "none", "above", "head");
+        splitProduction(w);
+        moved.length = 0;
+        movedDay = -1;
+      }
+      const sales = w.stepOwner.estimate;
+      if (movedDay < 0 && flowRising(w)) {
+        movedDay = w.day;
+        const pick = w.staff
+          .filter((s) => s.deptId === sales && !w.depts.some((d) => d.headId === s.id))
+          .sort((a, b) => b.skills.produce - a.skills.produce)
+          .slice(0, 2);
+        for (const s of pick) {
+          moved.push(s.id);
+          assignStaff(w, s.id, w.stepOwner.produce);
+        }
+      }
+      if (moved.length > 0 && w.day - movedDay >= 10) {
+        const f = flowCompare(w);
+        if (f.recent <= f.before) {
+          for (const id of moved) assignStaff(w, id, sales);
+          moved.length = 0;
+        }
+      }
     },
   };
 })();

@@ -9,7 +9,9 @@ import {
   canWork,
   causeSummary,
   finalOnTimeRate,
+  FLOW_HINT,
   flowCompare,
+  flowRising,
   lateDays,
   lateJobs,
   getStaff,
@@ -371,10 +373,9 @@ export function render(w: World, ui: UiState): string {
       ? `<div class="undo-only">${undoBtn}</div>`
       : "";
   const fc = flowCompare(w);
-  const surge =
-    fc.enough && fc.before > 0 && fc.recent >= fc.before * 1.25
-      ? `<div class="flowup" role="status">直近7日の発生 ${fc.recent}件(前の7日 ${fc.before}件) ↑</div>`
-      : "";
+  const surge = flowRising(w)
+    ? `<div class="flowup" role="status">直近${FLOW_HINT.days}日の発生 ${fc.recent}件(前の${FLOW_HINT.days}日 ${fc.before}件) ↑</div>`
+    : "";
   const presTag = ui.mode === "reparent" ? "button" : "span";
   return `
   <header class="top">
