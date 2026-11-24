@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrivalMultiplier, createInitialWorld, onTimeRate, payroll, stepDay, SURGES, TUNING, verdict } from "../sim";
+import { arrivalMultiplier, type JobKind, createInitialWorld, onTimeRate, payroll, stepDay, SURGES, TUNING, verdict } from "../sim";
 import {
   detectStuck,
   idleBot,
@@ -61,11 +61,11 @@ describe("ゲームとして成り立つか(標準の設定で測る)", () => {
   });
 
   it("繁忙期の間は、その種類の業務の発生が増える(5シードの合計)", () => {
-    const sg = SURGES[0]!;
-    expect(arrivalMultiplier(sg.kind, sg.fromDay - 1)).toBe(1);
-    expect(arrivalMultiplier(sg.kind, sg.fromDay)).toBe(sg.multiplier);
-    expect(arrivalMultiplier(sg.kind, sg.toDay)).toBe(sg.multiplier);
-    expect(arrivalMultiplier(sg.kind, sg.toDay + 1)).toBe(1);
+    const sg = SURGES.find((x) => x.kind === "small")!;
+    expect(arrivalMultiplier(sg.kind as JobKind, sg.fromDay - 1)).toBe(1);
+    expect(arrivalMultiplier(sg.kind as JobKind, sg.fromDay)).toBe(sg.multiplier);
+    expect(arrivalMultiplier(sg.kind as JobKind, sg.toDay)).toBe(sg.multiplier);
+    expect(arrivalMultiplier(sg.kind as JobKind, sg.toDay + 1)).toBe(1);
     const count = (from: number, to: number): number => {
       let n = 0;
       for (const seed of STANDARD_PROFILE.seeds) {

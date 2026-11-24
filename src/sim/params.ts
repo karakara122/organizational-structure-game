@@ -66,7 +66,8 @@ export const JOB_KIND_LIST = ["small", "large", "rush"] as const;
 
 /** 繁忙期(仕様書 4章)。この期間だけ、その種類の発生(件/日)に倍率を掛ける。画面では予告しない */
 export interface Surge {
-  kind: JobKind;
+  /** "all" は全種類 */
+  kind: JobKind | "all";
   /** 発生の日(日目)が、この日から この日まで(両端を含む)のあいだ、倍率を掛ける */
   fromDay: number;
   toDay: number;
@@ -74,14 +75,28 @@ export interface Surge {
 }
 
 /** 2026-11-23:小口注文が36〜65日目に1.3倍。放置だと成功と失敗の境目になり、途中で対応すると約10ポイント良くなる値(docs/測定結果.md) */
-export const SURGES: Surge[] = [{ kind: "small", fromDay: 36, toDay: 65, multiplier: 1.3 }];
+export const SURGES: Surge[] = [
+  { kind: "small", fromDay: 36, toDay: 65, multiplier: 1.3 },
+  /** 2026-11-24:45日目から全種類の注文が1.2倍(入社と同じ局面。会社が大きくなる)。放置は約30%、見本の直しのまま+新人部署なしで標準5シード3/5成功になる値 */
+  { kind: "all", fromDay: 45, toDay: 90, multiplier: 1.2 },
+];
 
 /** 発生の日 day に、kind の発生(件/日)へ掛ける倍率 */
 export function arrivalMultiplier(kind: JobKind, day: number): number {
   let m = 1;
-  for (const sg of SURGES) if (sg.kind === kind && day >= sg.fromDay && day <= sg.toDay) m *= sg.multiplier;
+  for (const sg of SURGES) if ((sg.kind === kind || sg.kind === "all") && day >= sg.fromDay && day <= sg.toDay) m *= sg.multiplier;
   return m;
 }
+
+/**
+ * 入社(仕様書 4章)。day 日目の朝に count 人が、制作を担当する部署に入社する(部署長ではない)。
+ * 会社が大きくなる局面:人が増え、部署長の部下が多くなる。注文の増加は SURGES の「all」の行で表す。
+ */
+export interface Hire {
+  day: number;
+  count: number;
+}
+export const HIRES: Hire[] = [{ day: 45, count: 12 }];
 
 /** 画面の「発生が増えた」の手がかり:直近 days 日の発生が、その前の days 日の ratio 倍以上のとき出す(2026-11-23 に7日・1.25倍から変更。測定結果) */
 export const FLOW_HINT = { days: 14, ratio: 1.15 } as const;

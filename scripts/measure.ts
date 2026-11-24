@@ -19,7 +19,7 @@ for (const m of rows) {
 console.log(`\n業務の発生(件/日):${Object.values(JOB_KINDS).map((k) => `${k.label} ${k.ratePerDay}`).join("、")}`);
 console.log(`ミスの確率 = ${TUNING.mistakeBase} − 専門能力×${TUNING.mistakePerSkill}、承認1件 ${TUNING.approvalTime}人日、管理 ${TUNING.manageTimePerSubordinate}人日/部下、管理の効きの下限 ${TUNING.manageEffectFloor}、部署長の給与 ${TUNING.salaryHead}`);
 
-console.log(`繁忙期:${SURGES.map((s) => `${JOB_KINDS[s.kind].label} ${s.fromDay}〜${s.toDay}日目に ${s.multiplier}倍`).join("、")}`);
+console.log(`繁忙期:${SURGES.map((s) => `${s.kind === "all" ? "全種類" : JOB_KINDS[s.kind].label} ${s.fromDay}〜${s.toDay}日目に ${s.multiplier}倍`).join("、")}`);
 
 console.log(`\n検証用のシード(${CHECK_SEEDS.length}個:${CHECK_SEEDS[0]}〜${CHECK_SEEDS[CHECK_SEEDS.length - 1]})。調整には使わず、標準のシードに合わせ込んでいないかを見る。\n`);
 console.log("| 操作 | 平均 | 最低〜最高 | 成功/惜しい/失敗 |");

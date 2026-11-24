@@ -7,18 +7,18 @@ import { payroll } from "./org";
 const FAMILY = ["青木", "石川", "上野", "江口", "小野", "梶原", "北村", "久保", "河野", "斎藤", "園田", "高梨", "辻本", "永井", "野村", "浜田", "平野", "福島", "松岡", "三浦", "村上", "森下", "八木", "山口", "和田"];
 const GIVEN = ["あおい", "いつき", "うみ", "えま", "かい", "さく", "しおん", "すず", "そら", "ちひろ", "なぎ", "のぞみ", "はると", "ひなた", "まこと", "みお", "ゆう", "りく", "れん", "わかな"];
 
-function makeName(seed: number, index: number): string {
+export function makeName(seed: number, index: number): string {
   const f = FAMILY[index % FAMILY.length]!;
   const g = GIVEN[Math.floor(rand01(seed, TAG.name, index) * GIVEN.length)]!;
   return `${f} ${g}`;
 }
 
 /** 専門能力のならび(平均が3)。部署ごとにずらして使う */
-const PRIMARY_SKILL_PATTERN = [3, 2, 4, 3, 3, 2, 4, 3];
-const MANAGE_PATTERN = [3, 2, 3, 4, 3, 2, 4, 3];
+export const PRIMARY_SKILL_PATTERN = [3, 2, 4, 3, 3, 2, 4, 3];
+export const MANAGE_PATTERN = [3, 2, 3, 4, 3, 2, 4, 3];
 
 /** 主な分野以外の専門能力(仮の値)。能力2は能率0.67なので、人を動かす意味はあるが、損もある */
-const OTHER_FIELD_SKILL = 2;
+export const OTHER_FIELD_SKILL = 2;
 
 interface DeptPlan {
   name: string;

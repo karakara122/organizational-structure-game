@@ -6,4 +6,5 @@ export * from "./step";
 export * from "./actions";
 export * from "./metrics";
 export * from "./baseline";
+export * from "./hire";
 export { rand01, poisson } from "./rng";

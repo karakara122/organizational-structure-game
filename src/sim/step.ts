@@ -1,3 +1,4 @@
+import { applyHires } from "./hire";
 import { arrivalMultiplier, JOB_KIND_LIST, JOB_KINDS, TUNING, type RouteStep, type Step } from "./params";
 import { poisson, rand01, TAG } from "./rng";
 import type { DayRecord, Job, World } from "./types";
@@ -124,6 +125,9 @@ export function onTimeRate(w: World, day: number = w.day): number | null {
 /** 1日ぶんを計算する(仕様書 3-4 の順番)。まとめ計算はしない */
 export function stepDay(w: World): DayRecord {
   const day = w.day + 1;
+
+  // 0. 入社の日なら、朝に新人が入る
+  applyHires(w, day);
 
   // 1. 新しい業務が発生し、最初の工程を担当する部署の待ちに入る
   let arrived = 0;
